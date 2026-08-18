@@ -209,6 +209,7 @@ async function renderAlumnoHome(){
   const fechas = conSeries.map(s => s.fecha);
   const streak = computeStreak(fechas);
   activeRutinaEjercicios = (rutina && rutina.rutina_ejercicios) ? rutina.rutina_ejercicios.slice().sort((a,b)=>(a.orden||0)-(b.orden||0)) : [];
+  const hayEntrenamientoHoy = (sesiones || []).some(s => s.fecha === todayStr());
 
   root().innerHTML = `
     <div class="header-actions">
@@ -224,7 +225,7 @@ async function renderAlumnoHome(){
       <div class="stat-tile"><div class="num">${conSeries.length}</div><div class="label">sesiones totales</div></div>
     </div>
 
-    <button class="btn" id="btn-nueva-sesion" style="margin-bottom:16px;">+ Nueva sesión de hoy</button>
+    <button class="btn" id="btn-nueva-sesion" style="margin-bottom:16px;">${hayEntrenamientoHoy ? '+ Seguir con el entrenamiento de hoy' : '+ Nueva sesión de hoy'}</button>
 
     ${rutina ? `
       <div class="card">
@@ -420,8 +421,26 @@ function setupProgresoChart(sesiones){
 // ---------- NUEVA SESIÓN (con autoguardado) ----------
 async function iniciarNuevaSesion(rutina){
   const btn = document.getElementById('btn-nueva-sesion');
-  if(btn){ btn.disabled = true; btn.textContent = 'Creando sesión...'; }
+  if(btn){ btn.disabled = true; btn.textContent = 'Cargando...'; }
   activeSesionFecha = todayStr();
+
+  // Si el alumno ya tiene una sesión guardada hoy, seguimos sumando ahí
+  // en vez de crear una tarjeta nueva por cada ejercicio.
+  const { data: existentes } = await sb.from('sesiones')
+    .select('*, sesion_series(*)')
+    .eq('alumno_id', profile.id)
+    .eq('fecha', activeSesionFecha)
+    .order('created_at', { ascending: false })
+    .limit(1);
+  const existente = existentes && existentes[0];
+
+  if(existente){
+    activeSesionId = existente.id;
+    activeSesionExs = groupSets(existente.sesion_series);
+    renderNuevaSesionForm();
+    return;
+  }
+
   const { data, error } = await sb.from('sesiones').insert({
     alumno_id: profile.id,
     rutina_id: rutina ? rutina.id : null,
@@ -444,6 +463,7 @@ function renderNuevaSesionForm(){
       <input type="date" id="input-fecha-sesion" value="${activeSesionFecha}" max="${todayStr()}" style="margin-bottom:0;">
     </div>
     <div class="sub" id="sesion-fecha-label">${formatDate(activeSesionFecha)} — cada serie se guarda sola apenas la agregas.</div>
+    <div class="sub" style="margin-top:-10px;">Agrega <b>todos</b> los ejercicios de hoy antes de finalizar: escribe el siguiente ejercicio abajo y sigue agregando series, todo queda en el mismo entrenamiento.</div>
 
     ${activeRutinaEjercicios.length ? `
       <div class="sub" style="margin-bottom:8px;">Ejercicios de tu rutina (toca para elegir):</div>
@@ -471,7 +491,8 @@ function renderNuevaSesionForm(){
         <span id="foto-label-text">📷 Agregar una foto de la sesión (opcional)</span>
         <input type="file" id="input-foto" accept="image/*">
       </label>
-      <button class="btn" id="btn-finalizar-sesion">Finalizar sesión</button>
+      <div class="sub" style="margin-top:0;">Toca esto recién cuando termines <b>todos</b> los ejercicios de hoy:</div>
+      <button class="btn" id="btn-finalizar-sesion">✓ Finalizar entrenamiento de hoy</button>
     </div>
   `;
   document.getElementById('btn-cancelar-sesion').onclick = cancelarSesion;
@@ -486,8 +507,23 @@ function renderNuevaSesionForm(){
 }
 
 async function actualizarFechaSesion(){
-  const val = document.getElementById('input-fecha-sesion').value;
+  const input = document.getElementById('input-fecha-sesion');
+  const val = input.value;
   if(!val) return;
+
+  const { data: choque } = await sb.from('sesiones')
+    .select('id')
+    .eq('alumno_id', profile.id)
+    .eq('fecha', val)
+    .neq('id', activeSesionId)
+    .limit(1);
+
+  if(choque && choque.length){
+    showToast('Ya hay un entrenamiento guardado en esa fecha — cancela esta sesión y entra a ese día para seguir sumando ahí.');
+    input.value = activeSesionFecha;
+    return;
+  }
+
   activeSesionFecha = val;
   const label = document.getElementById('sesion-fecha-label');
   if(label) label.textContent = `${formatDate(val)} — cada serie se guarda sola apenas la agregas.`;
