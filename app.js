@@ -638,7 +638,7 @@ async function agregarSetABloque(idx){
   grupo.sets.push(data);
   const setsHolder = document.getElementById(`bloque-sets-${idx}`);
   if(setsHolder){
-    setsHolder.innerHTML = grupo.sets.map((s,i) => `<div class="set-line">S${i+1}: <b>${s.peso}kg</b> × <b>${s.reps}</b></div>`).join('');
+    setsHolder.innerHTML = grupo.sets.map((s,i) => `<div class="set-line">S${i+1}: <b>${s.reps}</b> × <b>${s.peso}kg</b></div>`).join('');
   }
   if(pesoEl) pesoEl.value = '';
   if(repsEl){ repsEl.value = ''; repsEl.focus(); }
@@ -683,11 +683,11 @@ function renderDraftExercises(){
         <button type="button" class="remove-x" style="height:28px; width:28px; font-size:12px;" onclick="quitarBloqueEjercicio(${idx}, this)" title="Quitar ejercicio">✕</button>
       </div>
       <div id="bloque-sets-${idx}">
-        ${ex.sets.map((s,i)=>`<div class="set-line">S${i+1}: <b>${s.peso}kg</b> × <b>${s.reps}</b></div>`).join('')}
+        ${ex.sets.map((s,i)=>`<div class="set-line">S${i+1}: <b>${s.reps}</b> × <b>${s.peso}kg</b></div>`).join('')}
       </div>
       <div class="set-input-row" style="margin-top:8px;">
-        <div><input type="number" id="input-peso-${idx}" placeholder="Peso kg" style="margin-bottom:0;"></div>
         <div><input type="number" id="input-reps-${idx}" placeholder="Reps" style="margin-bottom:0;"></div>
+        <div><input type="number" id="input-peso-${idx}" placeholder="Peso kg" style="margin-bottom:0;"></div>
         <div><button type="button" class="btn-sm" id="btn-serie-${idx}" style="width:100%;" onclick="agregarSetABloque(${idx})">+ Serie</button></div>
       </div>
     </div>
