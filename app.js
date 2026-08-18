@@ -495,7 +495,7 @@ function renderNuevaSesionForm(){
       <input type="date" id="input-fecha-sesion" value="${activeSesionFecha}" max="${todayStr()}" style="margin-bottom:0;">
     </div>
     <div class="sub" id="sesion-fecha-label">${formatDate(activeSesionFecha)} — cada serie se guarda sola apenas la agregas.</div>
-    <div class="sub" style="margin-top:-10px;">Agrega <b>todos</b> los ejercicios de hoy antes de finalizar: escribe el siguiente ejercicio abajo y sigue agregando series, todo queda en el mismo entrenamiento.</div>
+    <div class="sub" style="margin-top:-10px;">Agrega un ejercicio, sumale sus series, y agrega otro ejercicio si te falta — todo queda en el mismo entrenamiento hasta que finalices.</div>
 
     ${activeRutinaDias.length ? `
       <div class="sub" style="margin-bottom:8px;">¿Qué día de tu programa entrenas hoy?</div>
@@ -505,21 +505,19 @@ function renderNuevaSesionForm(){
     ` : ''}
 
     ${ejerciciosSugeridos.length ? `
-      <div class="sub" style="margin-bottom:8px;">Ejercicios de ${escapeHtml(activeSesionDia)} (toca para elegir):</div>
+      <div class="sub" style="margin-bottom:8px;">Ejercicios de ${escapeHtml(activeSesionDia)} (toca para agregarlo):</div>
       <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px;">
-        ${ejerciciosSugeridos.map(ex => `<button type="button" class="btn-sm" onclick="seleccionarEjercicio('${escapeHtml(ex.nombre).replace(/'/g,"\\'")}')">${escapeHtml(ex.nombre)}</button>`).join('')}
+        ${ejerciciosSugeridos.map(ex => `<button type="button" class="btn-sm" onclick="agregarBloqueEjercicio('${escapeHtml(ex.nombre).replace(/'/g,"\\'")}')">${escapeHtml(ex.nombre)}</button>`).join('')}
       </div>
     ` : ''}
 
     <div id="draft-exercises"></div>
 
     <div class="card">
-      <label>Ejercicio</label>
-      <input type="text" id="input-ejercicio" placeholder="Ej: Remo Frontal con Polea">
-      <div class="set-input-row">
-        <div><label>Peso (kg)</label><input type="number" id="input-peso" placeholder="70"></div>
-        <div><label>Reps</label><input type="number" id="input-reps" placeholder="10"></div>
-        <div style="display:flex; align-items:flex-end;"><button class="btn-sm" style="width:100%;" id="btn-agregar-set">+ Agregar serie</button></div>
+      <label>Agregar ejercicio</label>
+      <div style="display:flex; gap:8px;">
+        <input type="text" id="input-nuevo-ejercicio" placeholder="Ej: Remo Frontal con Polea" style="margin-bottom:0; flex:1;">
+        <button type="button" class="btn-sm" id="btn-agregar-ejercicio" style="white-space:nowrap;">+ Agregar</button>
       </div>
     </div>
 
@@ -536,12 +534,31 @@ function renderNuevaSesionForm(){
   `;
   document.getElementById('btn-cancelar-sesion').onclick = cancelarSesion;
   document.getElementById('input-fecha-sesion').onchange = actualizarFechaSesion;
-  document.getElementById('btn-agregar-set').onclick = agregarSet;
+  document.getElementById('btn-agregar-ejercicio').onclick = () => agregarBloqueEjercicio();
+  document.getElementById('input-nuevo-ejercicio').onkeydown = (e) => { if(e.key === 'Enter'){ e.preventDefault(); agregarBloqueEjercicio(); } };
   document.getElementById('btn-finalizar-sesion').onclick = finalizarSesion;
   document.getElementById('input-foto').onchange = (e) => {
     const f = e.target.files[0];
     document.getElementById('foto-label-text').textContent = f ? `✅ ${f.name}` : '📷 Agregar una foto de la sesión (opcional)';
   };
+  renderDraftExercises();
+}
+
+// Crea (o enfoca) un bloque de ejercicio dentro del entrenamiento de hoy.
+// nombreForzado se usa cuando viene de un botón de sugerencia; si no, toma el input de texto.
+function agregarBloqueEjercicio(nombreForzado){
+  const input = document.getElementById('input-nuevo-ejercicio');
+  const nombre = (nombreForzado || (input ? input.value : '')).trim();
+  if(!nombre){ showToast('Escribe el nombre del ejercicio'); return; }
+
+  const existente = activeSesionExs.find(g => g.nombre.toLowerCase() === nombre.toLowerCase());
+  if(input) input.value = '';
+  if(existente){
+    showToast('Ese ejercicio ya está en tu entrenamiento de hoy — sumale series ahí abajo');
+    return;
+  }
+
+  activeSesionExs.push({ nombre, sets: [] });
   renderDraftExercises();
 }
 
@@ -577,48 +594,84 @@ async function seleccionarDiaSesion(nombre){
   renderNuevaSesionForm();
 }
 
-function seleccionarEjercicio(nombre){
-  document.getElementById('input-ejercicio').value = nombre;
-  document.getElementById('input-peso').focus();
-}
+async function agregarSetABloque(idx){
+  const grupo = activeSesionExs[idx];
+  if(!grupo) return;
+  const pesoEl = document.getElementById(`input-peso-${idx}`);
+  const repsEl = document.getElementById(`input-reps-${idx}`);
+  const peso = pesoEl ? pesoEl.value : '';
+  const reps = repsEl ? repsEl.value : '';
+  if(!reps){ showToast('Completa las repeticiones'); return; }
 
-async function agregarSet(){
-  const ejercicio = document.getElementById('input-ejercicio').value.trim();
-  const peso = document.getElementById('input-peso').value;
-  const reps = document.getElementById('input-reps').value;
-  if(!ejercicio || !reps){ showToast('Completa ejercicio y repeticiones'); return; }
-
-  const btn = document.getElementById('btn-agregar-set');
-  btn.disabled = true;
+  const btn = document.getElementById(`btn-serie-${idx}`);
+  if(btn) btn.disabled = true;
   const orden = activeSesionExs.reduce((acc,g)=>acc+g.sets.length,0);
   const { data, error } = await sb.from('sesion_series').insert({
     sesion_id: activeSesionId,
-    ejercicio_nombre: ejercicio,
+    ejercicio_nombre: grupo.nombre,
     peso: peso || 0,
     reps: reps,
     orden
   }).select().single();
-  btn.disabled = false;
+  if(btn) btn.disabled = false;
 
   if(error){ showToast('No se pudo guardar la serie, intenta de nuevo'); return; }
 
-  let group = activeSesionExs.find(g => g.nombre.toLowerCase() === ejercicio.toLowerCase());
-  if(!group){ group = { nombre: ejercicio, sets: [] }; activeSesionExs.push(group); }
-  group.sets.push(data);
-
-  document.getElementById('input-peso').value = '';
-  document.getElementById('input-reps').value = '';
-  renderDraftExercises();
+  grupo.sets.push(data);
+  const setsHolder = document.getElementById(`bloque-sets-${idx}`);
+  if(setsHolder){
+    setsHolder.innerHTML = grupo.sets.map((s,i) => `<div class="set-line">S${i+1}: <b>${s.peso}kg</b> × <b>${s.reps}</b></div>`).join('');
+  }
+  if(pesoEl) pesoEl.value = '';
+  if(repsEl){ repsEl.value = ''; repsEl.focus(); }
   showToast('Serie guardada ✓');
+}
+
+function quitarBloqueEjercicio(idx, btn){
+  const grupo = activeSesionExs[idx];
+  if(!grupo) return;
+  if(grupo.sets.length && btn && btn.dataset.confirm !== '1'){
+    btn.dataset.confirm = '1';
+    btn.textContent = '✕✕';
+    btn.title = 'Toca de nuevo para quitar este ejercicio y sus series';
+    setTimeout(() => {
+      if(btn.isConnected){ btn.dataset.confirm = ''; btn.textContent = '✕'; btn.title = 'Quitar ejercicio'; }
+    }, 3000);
+    return;
+  }
+  eliminarBloqueEjercicio(idx);
+}
+
+async function eliminarBloqueEjercicio(idx){
+  const grupo = activeSesionExs[idx];
+  if(!grupo) return;
+  const ids = grupo.sets.map(s => s.id).filter(Boolean);
+  if(ids.length){
+    const { error } = await sb.from('sesion_series').delete().in('id', ids);
+    if(error){ showToast('No se pudo quitar el ejercicio'); return; }
+  }
+  activeSesionExs.splice(idx, 1);
+  renderDraftExercises();
+  showToast('Ejercicio quitado');
 }
 
 function renderDraftExercises(){
   const el = document.getElementById('draft-exercises');
   if(!activeSesionExs.length){ el.innerHTML = ''; return; }
-  el.innerHTML = activeSesionExs.map(ex => `
+  el.innerHTML = activeSesionExs.map((ex, idx) => `
     <div class="exercise-group">
-      <div class="ex-head"><span class="ex-name">${escapeHtml(ex.nombre)}</span></div>
-      ${ex.sets.map((s,i)=>`<div class="set-line">S${i+1}: <b>${s.peso}kg</b> × <b>${s.reps}</b></div>`).join('')}
+      <div class="ex-head">
+        <span class="ex-name">${escapeHtml(ex.nombre)}</span>
+        <button type="button" class="remove-x" style="height:28px; width:28px; font-size:12px;" onclick="quitarBloqueEjercicio(${idx}, this)" title="Quitar ejercicio">✕</button>
+      </div>
+      <div id="bloque-sets-${idx}">
+        ${ex.sets.map((s,i)=>`<div class="set-line">S${i+1}: <b>${s.peso}kg</b> × <b>${s.reps}</b></div>`).join('')}
+      </div>
+      <div class="set-input-row" style="margin-top:8px;">
+        <div><input type="number" id="input-peso-${idx}" placeholder="Peso kg" style="margin-bottom:0;"></div>
+        <div><input type="number" id="input-reps-${idx}" placeholder="Reps" style="margin-bottom:0;"></div>
+        <div><button type="button" class="btn-sm" id="btn-serie-${idx}" style="width:100%;" onclick="agregarSetABloque(${idx})">+ Serie</button></div>
+      </div>
     </div>
   `).join('');
 }
