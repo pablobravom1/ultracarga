@@ -285,8 +285,11 @@ async function renderAlumnoHome(){
       </div>
     ` : ''}
 
-    <h2>Historial de entrenamiento</h2>
-    <div id="sesiones-list"></div>
+    <button class="btn-toggle-rutina" id="btn-toggle-historial">
+      <span>📖 Historial de entrenamiento</span>
+      <span id="historial-toggle-icon">Ver →</span>
+    </button>
+    <div class="hidden" id="sesiones-list"></div>
   `;
 
   document.getElementById('btn-logout').onclick = handleLogout;
@@ -313,6 +316,16 @@ async function renderAlumnoHome(){
       const abrir = calHolder.classList.contains('hidden');
       calHolder.classList.toggle('hidden', !abrir);
       calToggleIcon.textContent = abrir ? 'Ocultar ▲' : 'Ver →';
+    };
+  }
+  {
+    const btnToggleHist = document.getElementById('btn-toggle-historial');
+    const histHolder = document.getElementById('sesiones-list');
+    const histToggleIcon = document.getElementById('historial-toggle-icon');
+    btnToggleHist.onclick = () => {
+      const abrir = histHolder.classList.contains('hidden');
+      histHolder.classList.toggle('hidden', !abrir);
+      histToggleIcon.textContent = abrir ? 'Ocultar ▲' : 'Ver →';
     };
   }
 
@@ -361,6 +374,12 @@ function renderCalendar(holderId, fechas){
 function irASesion(fecha){
   const el = document.querySelector(`.session-card[data-fecha="${fecha}"]`);
   if(!el) return;
+  const holder = el.closest('.hidden');
+  if(holder){
+    holder.classList.remove('hidden');
+    const icon = document.getElementById('historial-toggle-icon');
+    if(icon) icon.textContent = 'Ocultar ▲';
+  }
   el.scrollIntoView({ behavior:'smooth', block:'center' });
   el.classList.add('highlight');
   setTimeout(()=> el.classList.remove('highlight'), 1600);
