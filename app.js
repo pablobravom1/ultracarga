@@ -1136,6 +1136,7 @@ async function renderCoachAlumnoDetail(alumnoId){
 
   const todasSesiones = markPRs(sesiones || []);
   const conSeries = todasSesiones.filter(s => (s.sesion_series||[]).length > 0);
+  const fechas = conSeries.map(s => s.fecha);
   const diasRutina = (rutina && rutina.rutina_ejercicios) ? groupPorDia(rutina.rutina_ejercicios) : [];
 
   root().innerHTML = `
@@ -1187,8 +1188,17 @@ async function renderCoachAlumnoDetail(alumnoId){
     </button>
     <div class="hidden" id="mediciones-holder"></div>
 
-    <h2>Historial de sesiones</h2>
-    <div id="sesiones-list"></div>
+    <button class="btn-toggle-rutina" id="btn-toggle-calendario">
+      <span class="toggle-label">${ICONS.calendar} Calendario</span>
+      ${toggleStateHtml()}
+    </button>
+    <div class="hidden" id="calendar-holder"></div>
+
+    <button class="btn-toggle-rutina" id="btn-toggle-historial">
+      <span class="toggle-label">${ICONS.book} Historial de sesiones</span>
+      ${toggleStateHtml()}
+    </button>
+    <div class="hidden" id="sesiones-list"></div>
   `;
   document.getElementById('btn-volver').onclick = renderCoachHome;
   document.getElementById('btn-nueva-rutina').onclick = () => renderRutinaEditor(alumno);
@@ -1201,6 +1211,9 @@ async function renderCoachAlumnoDetail(alumnoId){
       if(!medicionesInicializado){ renderMediciones('mediciones-holder', alumnoId); medicionesInicializado = true; }
     });
   }
+  wireToggle('btn-toggle-calendario', 'calendar-holder');
+  wireToggle('btn-toggle-historial', 'sesiones-list');
+  renderCalendar('calendar-holder', fechas);
   if(rutina){
     document.getElementById('btn-editar-rutina').onclick = () => {
       const dias = diasRutina.map(d => ({
