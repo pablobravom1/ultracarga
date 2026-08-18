@@ -1377,13 +1377,7 @@ async function renderCoachAlumnoDetail(alumnoId){
     <div class="hidden" id="sesiones-list"></div>
 
     ${profile.role === 'super_admin' ? `
-      <div class="card" style="margin-top:24px; border-color:var(--orange);">
-        <h2 style="color:var(--orange);">Zona de peligro</h2>
-        <div class="sub">Esto borra la cuenta de ${escapeHtml(alumno.nombre)} para siempre: su rutina, todas sus sesiones, mediciones y mensajes. No se puede deshacer.</div>
-        <label>Escribe "${escapeHtml(alumno.nombre)}" para confirmar</label>
-        <input type="text" id="input-confirmar-eliminar-alumno" placeholder="${escapeHtml(alumno.nombre)}" autocomplete="off">
-        <button class="btn-sm btn-eliminar-sesion" id="btn-eliminar-alumno" disabled style="width:100%; justify-content:center;">Eliminar alumno</button>
-      </div>
+      <button class="btn-sm btn-eliminar-sesion" id="btn-eliminar-alumno" style="margin-top:16px; width:100%; justify-content:center;">Eliminar alumno</button>
     ` : ''}
   `;
   document.getElementById('btn-volver').onclick = renderCoachHome;
@@ -1440,13 +1434,22 @@ async function renderCoachAlumnoDetail(alumnoId){
   renderSesionesList('sesiones-list', conSeries, true, () => renderCoachAlumnoDetail(alumnoId));
 
   if(profile.role === 'super_admin'){
-    const inputConfirmar = document.getElementById('input-confirmar-eliminar-alumno');
     const btnElimAlumno = document.getElementById('btn-eliminar-alumno');
-    const nombreObjetivo = alumno.nombre.trim().toLowerCase();
-    inputConfirmar.oninput = () => {
-      btnElimAlumno.disabled = inputConfirmar.value.trim().toLowerCase() !== nombreObjetivo;
+    btnElimAlumno.onclick = () => {
+      if(btnElimAlumno.dataset.confirm === '1'){
+        eliminarAlumno(alumnoId, alumno.nombre, btnElimAlumno);
+      } else {
+        btnElimAlumno.dataset.confirm = '1';
+        btnElimAlumno.textContent = '¿Seguro? Toca de nuevo para eliminar';
+        btnElimAlumno.classList.add('btn-danger-confirm');
+        setTimeout(() => {
+          if(!btnElimAlumno.isConnected) return;
+          btnElimAlumno.dataset.confirm = '';
+          btnElimAlumno.textContent = 'Eliminar alumno';
+          btnElimAlumno.classList.remove('btn-danger-confirm');
+        }, 3000);
+      }
     };
-    btnElimAlumno.onclick = () => eliminarAlumno(alumnoId, alumno.nombre, btnElimAlumno);
   }
 }
 
@@ -1456,6 +1459,7 @@ async function eliminarAlumno(alumnoId, nombre, btn){
   if(error){
     showToast('No se pudo eliminar: ' + error.message);
     btn.disabled = false; btn.textContent = 'Eliminar alumno';
+    btn.classList.remove('btn-danger-confirm');
     return;
   }
   showToast(`Cuenta de ${nombre} eliminada`);
