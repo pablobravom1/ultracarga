@@ -32,7 +32,8 @@ input:focus, select:focus, textarea:focus{outline:none; border-color:var(--blue)
 .pill.pr{background:var(--orange); color:var(--ink); font-weight:700; border-color:var(--orange);}
 .pill.streak{background:var(--blue); color:var(--ink); font-weight:700; border-color:var(--blue);}
 
-.session-card{background:var(--surface); border:1px solid var(--line); border-radius:6px; margin-bottom:12px; overflow:hidden;}
+.session-card{background:var(--surface); border:1px solid var(--line); border-radius:6px; margin-bottom:12px; overflow:hidden; transition:box-shadow 0.3s, border-color 0.3s;}
+.session-card.highlight{border-color:var(--blue); box-shadow:0 0 0 2px var(--blue);}
 .session-head{background:var(--surface-2); padding:10px 16px; font-family:'Oswald'; font-size:13px; letter-spacing:0.03em; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;}
 .session-body{padding:12px 16px;}
 .set-line{font-family:'IBM Plex Mono'; font-size:12.5px; color:var(--chalk-dim); padding:4px 0; border-bottom:1px solid var(--line); display:flex; justify-content:space-between;}
@@ -75,7 +76,7 @@ input:focus, select:focus, textarea:focus{outline:none; border-color:var(--blue)
 .calendar-grid{display:grid; grid-template-columns:repeat(7,1fr); gap:4px; text-align:center;}
 .calendar-grid .dow{font-size:10px; color:var(--chalk-dim); padding-bottom:4px;}
 .calendar-day{aspect-ratio:1; display:flex; align-items:center; justify-content:center; font-size:12px; border-radius:4px; color:var(--chalk-dim);}
-.calendar-day.trained{background:var(--blue); color:var(--ink); font-weight:700;}
+.calendar-day.trained{background:var(--blue); color:var(--ink); font-weight:700; cursor:pointer;}
 .calendar-day.empty-cell{visibility:hidden;}
 
 .exercise-group{margin-bottom:10px; padding:10px 12px; background:var(--ink); border-radius:4px;}

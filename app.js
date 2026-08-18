@@ -7,6 +7,7 @@ let session = null;
 let profile = null;
 let calendarMonthOffset = 0;
 let activeSesionId = null;   // sesión que se está registrando ahora mismo (autoguardado)
+let activeSesionFecha = null; // fecha elegida para la sesión activa (permite carga retroactiva)
 let activeSesionExs = [];    // sets ya guardados de la sesión activa, agrupados por ejercicio
 let activeRutinaEjercicios = []; // ejercicios sugeridos de la rutina activa del alumno logueado
 let rutinaEditorRows = [];   // filas del editor de rutina (coach)
@@ -279,7 +280,8 @@ function renderCalendar(holderId, fechas){
   for(let i=0;i<startOffset;i++) cells += `<div class="calendar-day empty-cell"></div>`;
   for(let d=1; d<=daysInMonth; d++){
     const iso = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-    cells += `<div class="calendar-day ${set.has(iso) ? 'trained' : ''}">${d}</div>`;
+    const trained = set.has(iso);
+    cells += `<div class="calendar-day ${trained ? 'trained' : ''}" ${trained ? `onclick="irASesion('${iso}')"` : ''}>${d}</div>`;
   }
 
   document.getElementById(holderId).innerHTML = `
@@ -299,6 +301,14 @@ function renderCalendar(holderId, fechas){
   document.getElementById('cal-next').onclick = () => { calendarMonthOffset++; renderCalendar(holderId, fechas); };
 }
 
+function irASesion(fecha){
+  const el = document.querySelector(`.session-card[data-fecha="${fecha}"]`);
+  if(!el) return;
+  el.scrollIntoView({ behavior:'smooth', block:'center' });
+  el.classList.add('highlight');
+  setTimeout(()=> el.classList.remove('highlight'), 1600);
+}
+
 function renderSesionesList(holderId, sesiones, isCoachView){
   const holder = document.getElementById(holderId);
   if(!sesiones.length){
@@ -309,7 +319,7 @@ function renderSesionesList(holderId, sesiones, isCoachView){
     const groups = groupSets(s.sesion_series);
     const totalSeries = (s.sesion_series || []).length;
     return `
-    <div class="session-card">
+    <div class="session-card" data-fecha="${s.fecha}">
       <div class="session-head">
         <span>${formatDate(s.fecha)}</span>
         <span class="pill">${totalSeries} series</span>
@@ -385,10 +395,11 @@ function setupProgresoChart(sesiones){
 async function iniciarNuevaSesion(rutina){
   const btn = document.getElementById('btn-nueva-sesion');
   if(btn){ btn.disabled = true; btn.textContent = 'Creando sesión...'; }
+  activeSesionFecha = todayStr();
   const { data, error } = await sb.from('sesiones').insert({
     alumno_id: profile.id,
     rutina_id: rutina ? rutina.id : null,
-    fecha: todayStr()
+    fecha: activeSesionFecha
   }).select().single();
   if(error){ showToast('No se pudo iniciar la sesión'); if(btn){btn.disabled=false; btn.textContent='+ Nueva sesión de hoy';} return; }
   activeSesionId = data.id;
@@ -399,10 +410,14 @@ async function iniciarNuevaSesion(rutina){
 function renderNuevaSesionForm(){
   root().innerHTML = `
     <div class="row-flex">
-      <h1 style="font-size:20px;">Sesión de hoy</h1>
+      <h1 style="font-size:20px;">Registrar entrenamiento</h1>
       <button class="link-btn" id="btn-cancelar-sesion">Cancelar</button>
     </div>
-    <div class="sub">${formatDate(todayStr())} — cada serie se guarda sola apenas la agregas.</div>
+    <div class="card" style="margin-bottom:16px;">
+      <label>Fecha del entrenamiento</label>
+      <input type="date" id="input-fecha-sesion" value="${activeSesionFecha}" max="${todayStr()}" style="margin-bottom:0;">
+    </div>
+    <div class="sub" id="sesion-fecha-label">${formatDate(activeSesionFecha)} — cada serie se guarda sola apenas la agregas.</div>
 
     ${activeRutinaEjercicios.length ? `
       <div class="sub" style="margin-bottom:8px;">Ejercicios de tu rutina (toca para elegir):</div>
@@ -434,6 +449,7 @@ function renderNuevaSesionForm(){
     </div>
   `;
   document.getElementById('btn-cancelar-sesion').onclick = cancelarSesion;
+  document.getElementById('input-fecha-sesion').onchange = actualizarFechaSesion;
   document.getElementById('btn-agregar-set').onclick = agregarSet;
   document.getElementById('btn-finalizar-sesion').onclick = finalizarSesion;
   document.getElementById('input-foto').onchange = (e) => {
@@ -441,6 +457,17 @@ function renderNuevaSesionForm(){
     document.getElementById('foto-label-text').textContent = f ? `✅ ${f.name}` : '📷 Agregar una foto de la sesión (opcional)';
   };
   renderDraftExercises();
+}
+
+async function actualizarFechaSesion(){
+  const val = document.getElementById('input-fecha-sesion').value;
+  if(!val) return;
+  activeSesionFecha = val;
+  const label = document.getElementById('sesion-fecha-label');
+  if(label) label.textContent = `${formatDate(val)} — cada serie se guarda sola apenas la agregas.`;
+  const { error } = await sb.from('sesiones').update({ fecha: val }).eq('id', activeSesionId);
+  if(error){ showToast('No se pudo actualizar la fecha'); return; }
+  showToast('Fecha actualizada ✓');
 }
 
 function seleccionarEjercicio(nombre){
