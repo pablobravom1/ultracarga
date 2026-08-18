@@ -29,7 +29,9 @@ const ICONS = {
   download: `<svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>`,
   plus: `<svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`,
   check: `<svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`,
-  arrowLeft: `<svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>`
+  arrowLeft: `<svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>`,
+  activity: `<svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>`,
+  camera: `<svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>`
 };
 // Markup del lado derecho de un botón-toggle: texto según estado + flecha que rota.
 function toggleStateHtml(closedTxt){
@@ -343,6 +345,12 @@ async function renderAlumnoHome(){
       </div>
     ` : ''}
 
+    <button class="btn-toggle-rutina" id="btn-toggle-mediciones">
+      <span class="toggle-label">${ICONS.activity} Mediciones corporales</span>
+      ${toggleStateHtml()}
+    </button>
+    <div class="hidden" id="mediciones-holder"></div>
+
     <button class="btn-toggle-rutina" id="btn-toggle-historial">
       <span class="toggle-label">${ICONS.book} Historial de entrenamiento</span>
       ${toggleStateHtml()}
@@ -366,6 +374,12 @@ async function renderAlumnoHome(){
     wireToggle('btn-toggle-progreso', 'progreso-wrap', () => {
       if(!progresoInicializado){ setupProgresoChart(conSeries); progresoInicializado = true; }
       else if(progresoChart){ progresoChart.resize(); }
+    });
+  }
+  {
+    let medicionesInicializado = false;
+    wireToggle('btn-toggle-mediciones', 'mediciones-holder', () => {
+      if(!medicionesInicializado){ renderMediciones('mediciones-holder', profile.id); medicionesInicializado = true; }
     });
   }
 
@@ -485,6 +499,94 @@ async function eliminarSesion(id, onDeleted){
   if(error){ showToast('No se pudo eliminar la sesión'); return; }
   showToast('Sesión eliminada');
   if(onDeleted) onDeleted();
+}
+
+// ---------- MEDICIONES CORPORALES (foto del resumen de InBody, con historial) ----------
+async function renderMediciones(holderId, alumnoId){
+  const holder = document.getElementById(holderId);
+  holder.innerHTML = `<div class="loading">Cargando mediciones...</div>`;
+
+  const { data: mediciones } = await sb.from('mediciones').select('*').eq('alumno_id', alumnoId).order('fecha', { ascending: false });
+
+  const listaHtml = (mediciones && mediciones.length)
+    ? mediciones.map(m => `
+      <div class="session-card">
+        <div class="session-head"><span>${formatDate(m.fecha)}</span></div>
+        <div class="session-body">
+          <img class="session-photo" src="${m.foto_url}" alt="Medición InBody">
+          <button class="btn-sm btn-eliminar-sesion" data-id="${m.id}" style="margin-top:12px;">Eliminar medición</button>
+        </div>
+      </div>
+    `).join('')
+    : `<div class="empty">Aún no hay mediciones registradas.</div>`;
+
+  holder.innerHTML = `
+    <div class="card" style="margin-bottom:16px;">
+      <label>Fecha de la medición</label>
+      <input type="date" id="input-fecha-medicion" value="${todayStr()}" max="${todayStr()}">
+      <label class="photo-input-label" for="input-foto-medicion">
+        <span id="medicion-foto-label-text">${ICONS.camera} Sube la foto del resumen de InBody</span>
+        <input type="file" id="input-foto-medicion" accept="image/*">
+      </label>
+      <button class="btn" id="btn-guardar-medicion">${ICONS.plus} Guardar medición</button>
+    </div>
+    ${listaHtml}
+  `;
+
+  document.getElementById('input-foto-medicion').onchange = (e) => {
+    const f = e.target.files[0];
+    document.getElementById('medicion-foto-label-text').innerHTML = f ? `${ICONS.check} ${escapeHtml(f.name)}` : `${ICONS.camera} Sube la foto del resumen de InBody`;
+  };
+  document.getElementById('btn-guardar-medicion').onclick = () => guardarMedicion(alumnoId, holderId);
+
+  holder.querySelectorAll('.btn-eliminar-sesion').forEach(btn => {
+    btn.onclick = () => {
+      if(btn.dataset.confirm === '1'){
+        eliminarMedicion(btn.dataset.id, alumnoId, holderId);
+      } else {
+        btn.dataset.confirm = '1';
+        btn.textContent = '¿Seguro? Toca de nuevo para eliminar';
+        btn.classList.add('btn-danger-confirm');
+        setTimeout(() => {
+          if(!btn.isConnected) return;
+          btn.dataset.confirm = '';
+          btn.textContent = 'Eliminar medición';
+          btn.classList.remove('btn-danger-confirm');
+        }, 3000);
+      }
+    };
+  });
+}
+
+async function guardarMedicion(alumnoId, holderId){
+  const btn = document.getElementById('btn-guardar-medicion');
+  const fechaInput = document.getElementById('input-fecha-medicion');
+  const fotoInput = document.getElementById('input-foto-medicion');
+  const file = fotoInput.files[0];
+  if(!file){ showToast('Selecciona la foto del resumen de InBody'); return; }
+
+  btn.disabled = true; btn.textContent = 'Guardando...';
+  try{
+    const ext = file.name.split('.').pop();
+    const path = `${alumnoId}/${Date.now()}.${ext}`;
+    const { error: upErr } = await sb.storage.from('medicion-fotos').upload(path, file, { upsert: true });
+    if(upErr){ showToast('No se pudo subir la foto'); btn.disabled = false; btn.innerHTML = `${ICONS.plus} Guardar medición`; return; }
+    const foto_url = sb.storage.from('medicion-fotos').getPublicUrl(path).data.publicUrl;
+    const { error } = await sb.from('mediciones').insert({ alumno_id: alumnoId, fecha: fechaInput.value, foto_url });
+    if(error){ showToast('No se pudo guardar la medición'); btn.disabled = false; btn.innerHTML = `${ICONS.plus} Guardar medición`; return; }
+    showToast('¡Medición guardada!');
+    renderMediciones(holderId, alumnoId);
+  }catch(e){
+    showToast('Hubo un problema guardando la medición');
+    btn.disabled = false; btn.innerHTML = `${ICONS.plus} Guardar medición`;
+  }
+}
+
+async function eliminarMedicion(id, alumnoId, holderId){
+  const { error } = await sb.from('mediciones').delete().eq('id', id);
+  if(error){ showToast('No se pudo eliminar la medición'); return; }
+  showToast('Medición eliminada');
+  renderMediciones(holderId, alumnoId);
 }
 
 function setupProgresoChart(sesiones){
@@ -1079,6 +1181,12 @@ async function renderCoachAlumnoDetail(alumnoId){
       </div>
     ` : ''}
 
+    <button class="btn-toggle-rutina" id="btn-toggle-mediciones">
+      <span class="toggle-label">${ICONS.activity} Mediciones corporales</span>
+      ${toggleStateHtml()}
+    </button>
+    <div class="hidden" id="mediciones-holder"></div>
+
     <h2>Historial de sesiones</h2>
     <div id="sesiones-list"></div>
   `;
@@ -1086,6 +1194,12 @@ async function renderCoachAlumnoDetail(alumnoId){
   document.getElementById('btn-nueva-rutina').onclick = () => renderRutinaEditor(alumno);
   if(rutina){
     wireToggle('btn-toggle-rutina', 'rutina-detail-card');
+  }
+  {
+    let medicionesInicializado = false;
+    wireToggle('btn-toggle-mediciones', 'mediciones-holder', () => {
+      if(!medicionesInicializado){ renderMediciones('mediciones-holder', alumnoId); medicionesInicializado = true; }
+    });
   }
   if(rutina){
     document.getElementById('btn-editar-rutina').onclick = () => {
