@@ -9,8 +9,9 @@ let calendarMonthOffset = 0;
 let activeSesionId = null;   // sesión que se está registrando ahora mismo (autoguardado)
 let activeSesionFecha = null; // fecha elegida para la sesión activa (permite carga retroactiva)
 let activeSesionExs = [];    // sets ya guardados de la sesión activa, agrupados por ejercicio
-let activeRutinaEjercicios = []; // ejercicios sugeridos de la rutina activa del alumno logueado
-let rutinaEditorRows = [];   // filas del editor de rutina (coach)
+let activeRutinaDias = [];   // días (con sus ejercicios) de la rutina activa del alumno logueado
+let activeSesionDia = null;  // día del programa que el alumno eligió entrenar en la sesión activa
+let rutinaEditorDias = [];   // bloques de día del editor de rutina (coach)
 let progresoChart = null;
 
 const root = () => document.getElementById('app-root');
@@ -86,6 +87,20 @@ function groupSets(series){
     g.sets.push(set);
   });
   return groups;
+}
+
+// Agrupa los ejercicios de una rutina por día (Día 1 — Empuje, Día 2 — Tracción, etc.)
+function groupPorDia(ejercicios){
+  const dias = [];
+  (ejercicios || []).slice()
+    .sort((a,b) => (a.dia_orden||0)-(b.dia_orden||0) || (a.orden||0)-(b.orden||0))
+    .forEach(ex => {
+      const nombreDia = ex.dia_nombre || 'Rutina';
+      let d = dias.find(d => d.nombre === nombreDia);
+      if(!d){ d = { nombre: nombreDia, ejercicios: [] }; dias.push(d); }
+      d.ejercicios.push(ex);
+    });
+  return dias;
 }
 
 // ---------- ARRANQUE ----------
@@ -199,16 +214,17 @@ async function handleLogout(){
 async function renderAlumnoHome(){
   root().innerHTML = `<div class="loading">Cargando tu historial...</div>`;
 
-  const [{ data: sesiones }, { data: rutina }] = await Promise.all([
+  const [{ data: sesiones }, { data: rutina }, { data: historialRutinas }] = await Promise.all([
     sb.from('sesiones').select('*, sesion_series(*)').eq('alumno_id', profile.id).order('fecha', { ascending: false }),
-    sb.from('rutinas').select('*, rutina_ejercicios(*)').eq('alumno_id', profile.id).eq('activa', true).maybeSingle()
+    sb.from('rutinas').select('*, rutina_ejercicios(*)').eq('alumno_id', profile.id).eq('activa', true).maybeSingle(),
+    sb.from('rutinas').select('id').eq('alumno_id', profile.id).eq('activa', false)
   ]);
 
   const todasSesiones = markPRs(sesiones || []);
   const conSeries = todasSesiones.filter(s => (s.sesion_series || []).length > 0);
   const fechas = conSeries.map(s => s.fecha);
   const streak = computeStreak(fechas);
-  activeRutinaEjercicios = (rutina && rutina.rutina_ejercicios) ? rutina.rutina_ejercicios.slice().sort((a,b)=>(a.orden||0)-(b.orden||0)) : [];
+  activeRutinaDias = (rutina && rutina.rutina_ejercicios) ? groupPorDia(rutina.rutina_ejercicios) : [];
   const hayEntrenamientoHoy = (sesiones || []).some(s => s.fecha === todayStr());
 
   root().innerHTML = `
@@ -234,11 +250,16 @@ async function renderAlumnoHome(){
           <button class="btn-sm" id="btn-pdf-rutina">Descargar PDF</button>
         </div>
         ${rutina.objetivo ? `<div class="sub" style="margin-bottom:12px;">${escapeHtml(rutina.objetivo)}</div>` : ''}
-        ${activeRutinaEjercicios.map(ex => `
-          <div class="set-line"><span>${escapeHtml(ex.nombre)}</span><b>${ex.series_objetivo || '-'} × ${escapeHtml(ex.reps_objetivo || '-')}</b></div>
+        ${activeRutinaDias.map(d => `
+          <div class="dia-heading">${escapeHtml(d.nombre)}</div>
+          ${d.ejercicios.map(ex => `
+            <div class="set-line"><span>${escapeHtml(ex.nombre)}</span><b>${ex.series_objetivo || '-'} × ${escapeHtml(ex.reps_objetivo || '-')}</b></div>
+          `).join('')}
         `).join('')}
       </div>
     ` : `<div class="card"><div class="empty" style="padding:16px;">Tu coach todavía no te ha asignado una rutina activa.</div></div>`}
+
+    ${historialRutinas && historialRutinas.length ? `<button class="link-btn" id="btn-ver-mis-rutinas" style="margin-bottom:16px;">Ver rutinas anteriores (${historialRutinas.length}) →</button>` : ''}
 
     <div id="calendar-holder"></div>
 
@@ -257,7 +278,10 @@ async function renderAlumnoHome(){
   document.getElementById('btn-logout').onclick = handleLogout;
   document.getElementById('btn-nueva-sesion').onclick = () => iniciarNuevaSesion(rutina);
   if(rutina){
-    document.getElementById('btn-pdf-rutina').onclick = () => descargarRutinaPDF(rutina, activeRutinaEjercicios);
+    document.getElementById('btn-pdf-rutina').onclick = () => descargarRutinaPDF(rutina, activeRutinaDias);
+  }
+  if(historialRutinas && historialRutinas.length){
+    document.getElementById('btn-ver-mis-rutinas').onclick = () => renderHistorialRutinas(profile, renderAlumnoHome, false);
   }
 
   renderCalendar('calendar-holder', fechas);
@@ -323,7 +347,10 @@ function renderSesionesList(holderId, sesiones, isCoachView, onDeleted){
     <div class="session-card" data-fecha="${s.fecha}">
       <div class="session-head">
         <span>${formatDate(s.fecha)}</span>
-        <span class="pill">${totalSeries} series</span>
+        <span style="display:flex; gap:6px; flex-wrap:wrap;">
+          ${s.dia_nombre ? `<span class="pill">${escapeHtml(s.dia_nombre)}</span>` : ''}
+          <span class="pill">${totalSeries} series</span>
+        </span>
       </div>
       <div class="session-body">
         ${groups.map(g => `
@@ -437,6 +464,7 @@ async function iniciarNuevaSesion(rutina){
   if(existente){
     activeSesionId = existente.id;
     activeSesionExs = groupSets(existente.sesion_series);
+    activeSesionDia = existente.dia_nombre || null;
     renderNuevaSesionForm();
     return;
   }
@@ -449,10 +477,14 @@ async function iniciarNuevaSesion(rutina){
   if(error){ showToast('No se pudo iniciar la sesión'); if(btn){btn.disabled=false; btn.textContent='+ Nueva sesión de hoy';} return; }
   activeSesionId = data.id;
   activeSesionExs = [];
+  activeSesionDia = null;
   renderNuevaSesionForm();
 }
 
 function renderNuevaSesionForm(){
+  const diaSeleccionadoObj = activeRutinaDias.find(d => d.nombre === activeSesionDia);
+  const ejerciciosSugeridos = diaSeleccionadoObj ? diaSeleccionadoObj.ejercicios : [];
+
   root().innerHTML = `
     <div class="row-flex">
       <h1 style="font-size:20px;">Registrar entrenamiento</h1>
@@ -465,10 +497,17 @@ function renderNuevaSesionForm(){
     <div class="sub" id="sesion-fecha-label">${formatDate(activeSesionFecha)} — cada serie se guarda sola apenas la agregas.</div>
     <div class="sub" style="margin-top:-10px;">Agrega <b>todos</b> los ejercicios de hoy antes de finalizar: escribe el siguiente ejercicio abajo y sigue agregando series, todo queda en el mismo entrenamiento.</div>
 
-    ${activeRutinaEjercicios.length ? `
-      <div class="sub" style="margin-bottom:8px;">Ejercicios de tu rutina (toca para elegir):</div>
+    ${activeRutinaDias.length ? `
+      <div class="sub" style="margin-bottom:8px;">¿Qué día de tu programa entrenas hoy?</div>
+      <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px;">
+        ${activeRutinaDias.map(d => `<button type="button" class="dia-btn ${activeSesionDia === d.nombre ? 'selected' : ''}" onclick="seleccionarDiaSesion('${escapeHtml(d.nombre).replace(/'/g,"\\'")}')">${escapeHtml(d.nombre)}</button>`).join('')}
+      </div>
+    ` : ''}
+
+    ${ejerciciosSugeridos.length ? `
+      <div class="sub" style="margin-bottom:8px;">Ejercicios de ${escapeHtml(activeSesionDia)} (toca para elegir):</div>
       <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px;">
-        ${activeRutinaEjercicios.map(ex => `<button type="button" class="btn-sm" onclick="seleccionarEjercicio('${escapeHtml(ex.nombre).replace(/'/g,"\\'")}')">${escapeHtml(ex.nombre)}</button>`).join('')}
+        ${ejerciciosSugeridos.map(ex => `<button type="button" class="btn-sm" onclick="seleccionarEjercicio('${escapeHtml(ex.nombre).replace(/'/g,"\\'")}')">${escapeHtml(ex.nombre)}</button>`).join('')}
       </div>
     ` : ''}
 
@@ -532,6 +571,12 @@ async function actualizarFechaSesion(){
   showToast('Fecha actualizada ✓');
 }
 
+async function seleccionarDiaSesion(nombre){
+  activeSesionDia = nombre;
+  await sb.from('sesiones').update({ dia_nombre: nombre }).eq('id', activeSesionId);
+  renderNuevaSesionForm();
+}
+
 function seleccionarEjercicio(nombre){
   document.getElementById('input-ejercicio').value = nombre;
   document.getElementById('input-peso').focus();
@@ -583,7 +628,7 @@ async function cancelarSesion(){
   if(totalSets === 0 && activeSesionId){
     await sb.from('sesiones').delete().eq('id', activeSesionId);
   }
-  activeSesionId = null; activeSesionExs = [];
+  activeSesionId = null; activeSesionExs = []; activeSesionDia = null;
   renderAlumnoHome();
 }
 
@@ -613,40 +658,126 @@ async function finalizarSesion(){
     showToast('Hubo un problema guardando algunos detalles, pero tus series ya quedaron guardadas.');
   }
 
-  activeSesionId = null; activeSesionExs = [];
+  activeSesionId = null; activeSesionExs = []; activeSesionDia = null;
   renderAlumnoHome();
 }
 
-function descargarRutinaPDF(rutina, ejercicios){
+function descargarRutinaPDF(rutina, dias){
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
   doc.setFontSize(18);
   doc.text('UltraCarga', 14, 18);
   doc.setFontSize(13);
   doc.text(rutina.nombre, 14, 28);
+  let y = 36;
   if(rutina.objetivo){
     doc.setFontSize(10);
-    doc.text(rutina.objetivo, 14, 35);
-  }
-  let y = 46;
-  doc.setFontSize(11);
-  doc.text('Ejercicio', 14, y);
-  doc.text('Series', 120, y);
-  doc.text('Reps', 145, y);
-  doc.text('Descanso', 170, y);
-  y += 6;
-  doc.setLineWidth(0.2);
-  doc.line(14, y, 196, y);
-  y += 6;
-  ejercicios.forEach(ex => {
-    if(y > 280){ doc.addPage(); y = 20; }
-    doc.text(String(ex.nombre).slice(0,45), 14, y);
-    doc.text(String(ex.series_objetivo || '-'), 120, y);
-    doc.text(String(ex.reps_objetivo || '-'), 145, y);
-    doc.text(ex.descanso_seg ? `${ex.descanso_seg}s` : '-', 170, y);
+    doc.text(rutina.objetivo, 14, y);
     y += 8;
+  }
+
+  (dias || []).forEach(dia => {
+    if(y > 265){ doc.addPage(); y = 20; }
+    y += 4;
+    doc.setFontSize(12);
+    doc.setFont(undefined, 'bold');
+    doc.text(dia.nombre, 14, y);
+    doc.setFont(undefined, 'normal');
+    y += 8;
+
+    doc.setFontSize(10);
+    doc.text('Ejercicio', 14, y);
+    doc.text('Series', 120, y);
+    doc.text('Reps', 145, y);
+    doc.text('Descanso', 170, y);
+    y += 5;
+    doc.setLineWidth(0.2);
+    doc.line(14, y, 196, y);
+    y += 6;
+
+    doc.setFontSize(11);
+    dia.ejercicios.forEach(ex => {
+      if(y > 280){ doc.addPage(); y = 20; }
+      doc.text(String(ex.nombre).slice(0,45), 14, y);
+      doc.text(String(ex.series_objetivo || '-'), 120, y);
+      doc.text(String(ex.reps_objetivo || '-'), 145, y);
+      doc.text(ex.descanso_seg ? `${ex.descanso_seg}s` : '-', 170, y);
+      y += 8;
+    });
+    y += 4;
   });
+
   doc.save(`${rutina.nombre.replace(/\s+/g,'_')}.pdf`);
+}
+
+// ---------- HISTORIAL Y DUPLICADO DE RUTINAS ----------
+async function renderHistorialRutinas(alumno, volverFn, permitirDuplicar){
+  root().innerHTML = `<div class="loading">Cargando rutinas anteriores...</div>`;
+  const { data: rutinas } = await sb.from('rutinas')
+    .select('*, rutina_ejercicios(*)')
+    .eq('alumno_id', alumno.id)
+    .eq('activa', false)
+    .order('created_at', { ascending: false });
+
+  root().innerHTML = `
+    <div class="header-actions">
+      <div>
+        <h1 style="font-size:20px;">Rutinas anteriores</h1>
+        <div class="sub" style="margin-bottom:0;">${escapeHtml(alumno.nombre)}</div>
+      </div>
+      <button class="switch-user" id="btn-volver-historial">← Volver</button>
+    </div>
+    <div id="historial-rutinas-list"></div>
+  `;
+  document.getElementById('btn-volver-historial').onclick = volverFn;
+
+  const listEl = document.getElementById('historial-rutinas-list');
+  if(!rutinas || !rutinas.length){
+    listEl.innerHTML = `<div class="empty">Todavía no hay rutinas anteriores guardadas.</div>`;
+    return;
+  }
+
+  listEl.innerHTML = rutinas.map(r => {
+    const dias = groupPorDia(r.rutina_ejercicios);
+    return `
+    <div class="card">
+      <div class="row-flex" style="margin-bottom:${permitirDuplicar ? '6px' : '0'};">
+        <h2 style="margin:0;">${escapeHtml(r.nombre)}</h2>
+        ${permitirDuplicar ? `<button class="btn-sm" data-dup-id="${r.id}">Usar como base</button>` : ''}
+      </div>
+      ${r.objetivo ? `<div class="sub" style="margin-bottom:6px;">${escapeHtml(r.objetivo)}</div>` : ''}
+      <div class="sub" style="margin-bottom:10px;">Creada el ${formatDateShort(String(r.created_at).slice(0,10))}</div>
+      ${dias.map(d => `
+        <div class="dia-heading">${escapeHtml(d.nombre)}</div>
+        ${d.ejercicios.map(ex => `
+          <div class="set-line"><span>${escapeHtml(ex.nombre)}</span><b>${ex.series_objetivo || '-'} × ${escapeHtml(ex.reps_objetivo || '-')}</b></div>
+        `).join('')}
+      `).join('')}
+    </div>
+  `;
+  }).join('');
+
+  if(permitirDuplicar){
+    listEl.querySelectorAll('[data-dup-id]').forEach(btn => {
+      btn.onclick = () => {
+        const rutina = rutinas.find(r => r.id === btn.dataset.dupId);
+        duplicarRutinaComoNueva(alumno, rutina);
+      };
+    });
+  }
+}
+
+function duplicarRutinaComoNueva(alumno, rutinaVieja){
+  const dias = groupPorDia(rutinaVieja.rutina_ejercicios).map(d => ({
+    nombre: d.nombre,
+    ejercicios: d.ejercicios.map(ex => ({
+      nombre: ex.nombre || '',
+      series_objetivo: ex.series_objetivo != null ? String(ex.series_objetivo) : '',
+      reps_objetivo: ex.reps_objetivo || '',
+      descanso_seg: ex.descanso_seg != null ? String(ex.descanso_seg) : ''
+    }))
+  }));
+  renderRutinaEditor(alumno, { nombre: rutinaVieja.nombre, objetivo: rutinaVieja.objetivo || '', dias });
 }
 
 // ============================================================
@@ -699,12 +830,12 @@ async function renderCoachAlumnoDetail(alumnoId){
     sb.from('profiles').select('*').eq('id', alumnoId).single(),
     sb.from('sesiones').select('*, sesion_series(*)').eq('alumno_id', alumnoId).order('fecha', { ascending:false }),
     sb.from('rutinas').select('*, rutina_ejercicios(*)').eq('alumno_id', alumnoId).eq('activa', true).maybeSingle(),
-    sb.from('rutinas').select('*').eq('alumno_id', alumnoId).eq('activa', false).order('created_at', { ascending:false })
+    sb.from('rutinas').select('id').eq('alumno_id', alumnoId).eq('activa', false)
   ]);
 
   const todasSesiones = markPRs(sesiones || []);
   const conSeries = todasSesiones.filter(s => (s.sesion_series||[]).length > 0);
-  const ejerciciosRutina = (rutina && rutina.rutina_ejercicios) ? rutina.rutina_ejercicios.slice().sort((a,b)=>(a.orden||0)-(b.orden||0)) : [];
+  const diasRutina = (rutina && rutina.rutina_ejercicios) ? groupPorDia(rutina.rutina_ejercicios) : [];
 
   root().innerHTML = `
     <div class="header-actions">
@@ -720,10 +851,14 @@ async function renderCoachAlumnoDetail(alumnoId){
         <h2 style="margin:0;">${rutina ? escapeHtml(rutina.nombre) : 'Sin rutina activa'}</h2>
         <button class="btn-sm" id="btn-nueva-rutina">${rutina ? 'Crear nueva rutina' : '+ Crear rutina'}</button>
       </div>
-      ${rutina ? ejerciciosRutina.map(ex => `
-        <div class="set-line"><span>${escapeHtml(ex.nombre)}</span><b>${ex.series_objetivo || '-'} × ${escapeHtml(ex.reps_objetivo || '-')}</b></div>
-      `).join('') : ''}
-      ${historial && historial.length ? `<div class="sub" style="margin-top:10px; margin-bottom:0;">Rutinas anteriores: ${historial.length}</div>` : ''}
+      ${rutina && rutina.objetivo ? `<div class="sub" style="margin-bottom:8px;">${escapeHtml(rutina.objetivo)}</div>` : ''}
+      ${diasRutina.map(d => `
+        <div class="dia-heading">${escapeHtml(d.nombre)}</div>
+        ${d.ejercicios.map(ex => `
+          <div class="set-line"><span>${escapeHtml(ex.nombre)}</span><b>${ex.series_objetivo || '-'} × ${escapeHtml(ex.reps_objetivo || '-')}</b></div>
+        `).join('')}
+      `).join('')}
+      ${historial && historial.length ? `<button class="link-btn" id="btn-ver-historial-rutinas" style="margin-top:12px;">Ver rutinas anteriores (${historial.length}) →</button>` : ''}
     </div>
 
     <h2>Historial de sesiones</h2>
@@ -731,6 +866,9 @@ async function renderCoachAlumnoDetail(alumnoId){
   `;
   document.getElementById('btn-volver').onclick = renderCoachHome;
   document.getElementById('btn-nueva-rutina').onclick = () => renderRutinaEditor(alumno);
+  if(historial && historial.length){
+    document.getElementById('btn-ver-historial-rutinas').onclick = () => renderHistorialRutinas(alumno, () => renderCoachAlumnoDetail(alumnoId), true);
+  }
   renderSesionesList('sesiones-list', conSeries, true, () => renderCoachAlumnoDetail(alumnoId));
 }
 
@@ -741,61 +879,103 @@ async function guardarNotaCoach(sesionId){
   showToast('Nota guardada ✓');
 }
 
-function renderRutinaEditor(alumno){
-  rutinaEditorRows = [{ nombre:'', series_objetivo:'', reps_objetivo:'', descanso_seg:'' }];
+function renderRutinaEditor(alumno, prefill){
+  rutinaEditorDias = (prefill && prefill.dias && prefill.dias.length)
+    ? prefill.dias.map(d => ({ nombre: d.nombre, ejercicios: d.ejercicios.map(ex => ({...ex})) }))
+    : [{ nombre: 'Día 1', ejercicios: [{ nombre:'', series_objetivo:'', reps_objetivo:'', descanso_seg:'' }] }];
+
   root().innerHTML = `
     <div class="header-actions">
       <div>
-        <h1 style="font-size:20px;">Nueva rutina — ${escapeHtml(alumno.nombre)}</h1>
-        <div class="sub" style="margin-bottom:0;">Esta va a quedar como la rutina activa del alumno.</div>
+        <h1 style="font-size:20px;">${prefill ? 'Duplicar rutina' : 'Nueva rutina'} — ${escapeHtml(alumno.nombre)}</h1>
+        <div class="sub" style="margin-bottom:0;">Esta va a quedar como la rutina activa del alumno. Puedes armar hasta 5 días distintos (ej: Empuje, Tracción, Piernas).</div>
       </div>
       <button class="switch-user" id="btn-cancelar-rutina">Cancelar</button>
     </div>
 
     <div class="card">
-      <label>Nombre de la rutina</label>
-      <input type="text" id="rutina-nombre" placeholder="Ej: Fuerza — Fase 1">
+      <label>Nombre del programa</label>
+      <input type="text" id="rutina-nombre" placeholder="Ej: Hipertrofia — Fase 1" value="${escapeHtml(prefill ? prefill.nombre : '')}">
       <label>Objetivo (opcional)</label>
-      <input type="text" id="rutina-objetivo" placeholder="Ej: Hipertrofia tren superior">
+      <input type="text" id="rutina-objetivo" placeholder="Ej: Hipertrofia tren superior" value="${escapeHtml(prefill ? prefill.objetivo : '')}">
     </div>
 
-    <h2>Ejercicios</h2>
-    <div id="rutina-ex-rows"></div>
-    <button class="btn-ghost" id="btn-agregar-ejercicio">+ Agregar ejercicio</button>
+    <div id="rutina-dias-holder"></div>
+    <button class="btn-ghost" id="btn-agregar-dia">+ Agregar otro día</button>
     <button class="btn" id="btn-guardar-rutina" style="margin-top:16px;">Guardar rutina</button>
   `;
   document.getElementById('btn-cancelar-rutina').onclick = () => renderCoachAlumnoDetail(alumno.id);
-  document.getElementById('btn-agregar-ejercicio').onclick = () => {
-    rutinaEditorRows.push({ nombre:'', series_objetivo:'', reps_objetivo:'', descanso_seg:'' });
-    renderRutinaExRows();
+  document.getElementById('btn-agregar-dia').onclick = () => {
+    if(rutinaEditorDias.length >= 5){ showToast('Máximo 5 días por programa'); return; }
+    rutinaEditorDias.push({ nombre: `Día ${rutinaEditorDias.length + 1}`, ejercicios: [{ nombre:'', series_objetivo:'', reps_objetivo:'', descanso_seg:'' }] });
+    renderRutinaDiasEditor();
   };
   document.getElementById('btn-guardar-rutina').onclick = () => guardarRutina(alumno);
-  renderRutinaExRows();
+  renderRutinaDiasEditor();
 }
 
-function renderRutinaExRows(){
-  const holder = document.getElementById('rutina-ex-rows');
-  holder.innerHTML = rutinaEditorRows.map((row, i) => `
-    <div class="rutina-ex-row">
-      <div><label>Ejercicio</label><input type="text" value="${escapeHtml(row.nombre)}" oninput="rutinaEditorRows[${i}].nombre=this.value"></div>
-      <div><label>Series</label><input type="number" value="${escapeHtml(row.series_objetivo)}" oninput="rutinaEditorRows[${i}].series_objetivo=this.value"></div>
-      <div><label>Reps</label><input type="text" value="${escapeHtml(row.reps_objetivo)}" oninput="rutinaEditorRows[${i}].reps_objetivo=this.value"></div>
-      <button type="button" class="remove-x" onclick="quitarFilaRutina(${i})">✕</button>
+function renderRutinaDiasEditor(){
+  const holder = document.getElementById('rutina-dias-holder');
+  holder.innerHTML = rutinaEditorDias.map((dia, d) => `
+    <div class="card">
+      <div class="row-flex" style="margin-bottom:10px;">
+        <input type="text" value="${escapeHtml(dia.nombre)}" style="margin-bottom:0; font-family:'Oswald'; font-weight:600;" oninput="rutinaEditorDias[${d}].nombre=this.value" placeholder="Ej: Día 1 — Empuje">
+        ${rutinaEditorDias.length > 1 ? `<button type="button" class="btn-sm" onclick="quitarDiaRutina(${d})" style="margin-left:8px; white-space:nowrap;">Quitar día</button>` : ''}
+      </div>
+      <div id="rutina-dia-ex-${d}"></div>
+      <button type="button" class="btn-ghost" onclick="agregarEjercicioADia(${d})">+ Agregar ejercicio</button>
     </div>
   `).join('');
+
+  rutinaEditorDias.forEach((dia, d) => {
+    document.getElementById(`rutina-dia-ex-${d}`).innerHTML = dia.ejercicios.map((row, e) => `
+      <div class="rutina-ex-row">
+        <div><label>Ejercicio</label><input type="text" value="${escapeHtml(row.nombre)}" oninput="rutinaEditorDias[${d}].ejercicios[${e}].nombre=this.value"></div>
+        <div><label>Series</label><input type="number" value="${escapeHtml(row.series_objetivo)}" oninput="rutinaEditorDias[${d}].ejercicios[${e}].series_objetivo=this.value"></div>
+        <div><label>Reps</label><input type="text" value="${escapeHtml(row.reps_objetivo)}" oninput="rutinaEditorDias[${d}].ejercicios[${e}].reps_objetivo=this.value"></div>
+        <button type="button" class="remove-x" onclick="quitarEjercicioDeDia(${d},${e})">✕</button>
+      </div>
+    `).join('');
+  });
 }
 
-function quitarFilaRutina(i){
-  rutinaEditorRows.splice(i,1);
-  if(!rutinaEditorRows.length) rutinaEditorRows.push({ nombre:'', series_objetivo:'', reps_objetivo:'', descanso_seg:'' });
-  renderRutinaExRows();
+function agregarEjercicioADia(d){
+  rutinaEditorDias[d].ejercicios.push({ nombre:'', series_objetivo:'', reps_objetivo:'', descanso_seg:'' });
+  renderRutinaDiasEditor();
+}
+
+function quitarEjercicioDeDia(d, e){
+  rutinaEditorDias[d].ejercicios.splice(e, 1);
+  if(!rutinaEditorDias[d].ejercicios.length) rutinaEditorDias[d].ejercicios.push({ nombre:'', series_objetivo:'', reps_objetivo:'', descanso_seg:'' });
+  renderRutinaDiasEditor();
+}
+
+function quitarDiaRutina(d){
+  rutinaEditorDias.splice(d, 1);
+  renderRutinaDiasEditor();
 }
 
 async function guardarRutina(alumno){
   const nombre = document.getElementById('rutina-nombre').value.trim();
   const objetivo = document.getElementById('rutina-objetivo').value.trim();
-  const ejercicios = rutinaEditorRows.filter(r => r.nombre.trim());
-  if(!nombre || !ejercicios.length){ showToast('Ponle un nombre a la rutina y al menos un ejercicio'); return; }
+
+  const filas = [];
+  rutinaEditorDias.forEach((dia, di) => {
+    const nombreDia = (dia.nombre || '').trim() || `Día ${di+1}`;
+    dia.ejercicios.filter(r => r.nombre.trim()).forEach((r, ei) => {
+      filas.push({
+        nombre: r.nombre.trim(),
+        series_objetivo: r.series_objetivo ? Number(r.series_objetivo) : null,
+        reps_objetivo: r.reps_objetivo || null,
+        descanso_seg: r.descanso_seg ? Number(r.descanso_seg) : null,
+        dia_nombre: nombreDia,
+        dia_orden: di,
+        orden: ei
+      });
+    });
+  });
+
+  if(!nombre || !filas.length){ showToast('Ponle un nombre al programa y al menos un ejercicio en algún día'); return; }
 
   const btn = document.getElementById('btn-guardar-rutina');
   btn.disabled = true; btn.textContent = 'Guardando...';
@@ -808,15 +988,7 @@ async function guardarRutina(alumno){
 
   if(error){ showToast('No se pudo crear la rutina'); btn.disabled=false; btn.textContent='Guardar rutina'; return; }
 
-  const filas = ejercicios.map((r,i) => ({
-    rutina_id: rutina.id,
-    nombre: r.nombre.trim(),
-    series_objetivo: r.series_objetivo ? Number(r.series_objetivo) : null,
-    reps_objetivo: r.reps_objetivo || null,
-    descanso_seg: r.descanso_seg ? Number(r.descanso_seg) : null,
-    orden: i
-  }));
-  await sb.from('rutina_ejercicios').insert(filas);
+  await sb.from('rutina_ejercicios').insert(filas.map(f => ({ ...f, rutina_id: rutina.id })));
 
   showToast('¡Rutina guardada!');
   renderCoachAlumnoDetail(alumno.id);
