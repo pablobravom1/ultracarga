@@ -108,6 +108,9 @@ function renderExMeta(ex){
   const peso = ex.peso_objetivo ? `<span class="pill" style="padding:2px 8px; font-size:10.5px;">${escapeHtml(ex.peso_objetivo)}</span>` : '';
   return `<span style="display:flex; align-items:center; gap:6px;"><b>${sxr}</b>${peso}</span>`;
 }
+function renderExNota(ex){
+  return ex.nota ? `<div class="ex-nota">📝 ${escapeHtml(ex.nota)}</div>` : '';
+}
 
 // ---------- ARRANQUE ----------
 async function boot(){
@@ -263,7 +266,7 @@ async function renderAlumnoHome(){
         ${activeRutinaDias.map(d => `
           <div class="dia-heading">${escapeHtml(d.nombre)}</div>
           ${d.ejercicios.map(ex => `
-            <div class="set-line"><span>${escapeHtml(ex.nombre)}</span>${renderExMeta(ex)}</div>
+            <div class="set-line"><span>${escapeHtml(ex.nombre)}</span>${renderExMeta(ex)}</div>${renderExNota(ex)}
           `).join('')}
         `).join('')}
       </div>
@@ -278,8 +281,11 @@ async function renderAlumnoHome(){
     <div class="hidden" id="calendar-holder"></div>
 
     ${conSeries.length ? `
-      <div class="chart-wrap">
-        <h2>Progresión por ejercicio</h2>
+      <button class="btn-toggle-rutina" id="btn-toggle-progreso">
+        <span>📈 Progresión por ejercicio</span>
+        <span id="progreso-toggle-icon">Ver →</span>
+      </button>
+      <div class="chart-wrap hidden" id="progreso-wrap">
         <select id="progreso-select" style="margin-bottom:10px;"></select>
         <canvas id="progreso-canvas"></canvas>
       </div>
@@ -328,11 +334,24 @@ async function renderAlumnoHome(){
       histToggleIcon.textContent = abrir ? 'Ocultar ▲' : 'Ver →';
     };
   }
+  if(conSeries.length){
+    let progresoInicializado = false;
+    const btnToggleProgreso = document.getElementById('btn-toggle-progreso');
+    const progresoWrap = document.getElementById('progreso-wrap');
+    const progresoToggleIcon = document.getElementById('progreso-toggle-icon');
+    btnToggleProgreso.onclick = () => {
+      const abrir = progresoWrap.classList.contains('hidden');
+      progresoWrap.classList.toggle('hidden', !abrir);
+      progresoToggleIcon.textContent = abrir ? 'Ocultar ▲' : 'Ver →';
+      if(abrir){
+        if(!progresoInicializado){ setupProgresoChart(conSeries); progresoInicializado = true; }
+        else if(progresoChart){ progresoChart.resize(); }
+      }
+    };
+  }
 
   renderCalendar('calendar-holder', fechas);
   renderSesionesList('sesiones-list', conSeries, false, renderAlumnoHome);
-
-  if(conSeries.length) setupProgresoChart(conSeries);
 }
 
 function renderCalendar(holderId, fechas){
@@ -407,7 +426,7 @@ function renderSesionesList(holderId, sesiones, isCoachView, onDeleted){
         ${groups.map(g => `
           <div class="exercise-group">
             <div class="ex-head"><span class="ex-name">${escapeHtml(g.nombre)}</span></div>
-            ${g.sets.map((set,i) => `<div class="set-line">S${i+1}: <b>${set.peso}kg</b> × <b>${set.reps}</b> reps ${set._isPR ? '<span class="pill pr">🏆 PR</span>' : ''}</div>`).join('')}
+            ${g.sets.map((set,i) => `<div class="set-line">S${i+1}: <b>${set.reps}</b> reps × <b>${set.peso}kg</b> ${set.nota ? `<span class="pill" style="padding:2px 8px; font-size:10.5px;">${escapeHtml(set.nota)}</span>` : ''} ${set._isPR ? '<span class="pill pr">🏆 PR</span>' : ''}</div>`).join('')}
           </div>
         `).join('')}
         ${s.nota_alumno ? `<div class="note-box"><div class="note-label">Nota del alumno</div>${escapeHtml(s.nota_alumno)}</div>` : ''}
@@ -658,13 +677,20 @@ async function seleccionarDiaSesion(nombre){
   renderNuevaSesionForm();
 }
 
+function renderSetLine(s, i){
+  const nota = s.nota ? `<span class="pill" style="padding:2px 8px; font-size:10.5px;">${escapeHtml(s.nota)}</span>` : '';
+  return `<div class="set-line">S${i+1}: <b>${s.reps}</b> × <b>${s.peso}kg</b>${nota ? ` ${nota}` : ''}</div>`;
+}
+
 async function agregarSetABloque(idx){
   const grupo = activeSesionExs[idx];
   if(!grupo) return;
   const pesoEl = document.getElementById(`input-peso-${idx}`);
   const repsEl = document.getElementById(`input-reps-${idx}`);
+  const notaEl = document.getElementById(`input-nota-${idx}`);
   const peso = pesoEl ? pesoEl.value : '';
   const reps = repsEl ? repsEl.value : '';
+  const nota = notaEl ? notaEl.value.trim() : '';
   if(!reps){ showToast('Completa las repeticiones'); return; }
 
   const btn = document.getElementById(`btn-serie-${idx}`);
@@ -675,6 +701,7 @@ async function agregarSetABloque(idx){
     ejercicio_nombre: grupo.nombre,
     peso: peso || 0,
     reps: reps,
+    nota: nota || null,
     orden
   }).select().single();
   if(btn) btn.disabled = false;
@@ -684,10 +711,11 @@ async function agregarSetABloque(idx){
   grupo.sets.push(data);
   const setsHolder = document.getElementById(`bloque-sets-${idx}`);
   if(setsHolder){
-    setsHolder.innerHTML = grupo.sets.map((s,i) => `<div class="set-line">S${i+1}: <b>${s.reps}</b> × <b>${s.peso}kg</b></div>`).join('');
+    setsHolder.innerHTML = grupo.sets.map(renderSetLine).join('');
   }
   if(pesoEl) pesoEl.value = '';
   if(repsEl){ repsEl.value = ''; repsEl.focus(); }
+  if(notaEl) notaEl.value = '';
   showToast('Serie guardada ✓');
 }
 
@@ -729,13 +757,14 @@ function renderDraftExercises(){
         <button type="button" class="remove-x" style="height:28px; width:28px; font-size:12px;" onclick="quitarBloqueEjercicio(${idx}, this)" title="Quitar ejercicio">✕</button>
       </div>
       <div id="bloque-sets-${idx}">
-        ${ex.sets.map((s,i)=>`<div class="set-line">S${i+1}: <b>${s.reps}</b> × <b>${s.peso}kg</b></div>`).join('')}
+        ${ex.sets.map(renderSetLine).join('')}
       </div>
       <div class="set-input-row" style="margin-top:8px;">
         <div><input type="number" id="input-reps-${idx}" placeholder="Reps" style="margin-bottom:0;"></div>
         <div><input type="number" id="input-peso-${idx}" placeholder="Peso kg" style="margin-bottom:0;"></div>
         <div><button type="button" class="btn-sm" id="btn-serie-${idx}" style="width:100%;" onclick="agregarSetABloque(${idx})">+ Serie</button></div>
       </div>
+      <input type="text" id="input-nota-${idx}" placeholder="Nota de esta serie (opcional): drop set, rest-pause, al fallo..." style="margin-top:8px; margin-bottom:0;">
     </div>
   `).join('');
 }
@@ -821,7 +850,17 @@ function descargarRutinaPDF(rutina, dias){
       doc.text(String(ex.reps_objetivo || '-'), 116, y);
       doc.text(String(ex.peso_objetivo || '-').slice(0,12), 138, y);
       doc.text(ex.descanso_seg ? `${ex.descanso_seg}s` : '-', 168, y);
-      y += 8;
+      y += 6;
+      if(ex.nota){
+        if(y > 280){ doc.addPage(); y = 20; }
+        doc.setFontSize(9);
+        doc.setFont(undefined, 'italic');
+        doc.text(`Nota: ${String(ex.nota).slice(0,80)}`, 14, y);
+        doc.setFont(undefined, 'normal');
+        doc.setFontSize(11);
+        y += 6;
+      }
+      y += 2;
     });
     y += 4;
   });
@@ -874,7 +913,7 @@ async function renderHistorialRutinas(alumno, volverFn, permitirDuplicar){
       ${dias.map(d => `
         <div class="dia-heading">${escapeHtml(d.nombre)}</div>
         ${d.ejercicios.map(ex => `
-          <div class="set-line"><span>${escapeHtml(ex.nombre)}</span>${renderExMeta(ex)}</div>
+          <div class="set-line"><span>${escapeHtml(ex.nombre)}</span>${renderExMeta(ex)}</div>${renderExNota(ex)}
         `).join('')}
       `).join('')}
     </div>
@@ -923,6 +962,7 @@ function duplicarRutinaComoNueva(alumno, rutinaVieja){
       series_objetivo: ex.series_objetivo != null ? String(ex.series_objetivo) : '',
       reps_objetivo: ex.reps_objetivo || '',
       peso_objetivo: ex.peso_objetivo || '',
+      nota: ex.nota || '',
       descanso_seg: ex.descanso_seg != null ? String(ex.descanso_seg) : ''
     }))
   }));
@@ -1022,7 +1062,7 @@ async function renderCoachAlumnoDetail(alumnoId){
         ${diasRutina.map(d => `
           <div class="dia-heading">${escapeHtml(d.nombre)}</div>
           ${d.ejercicios.map(ex => `
-            <div class="set-line"><span>${escapeHtml(ex.nombre)}</span>${renderExMeta(ex)}</div>
+            <div class="set-line"><span>${escapeHtml(ex.nombre)}</span>${renderExMeta(ex)}</div>${renderExNota(ex)}
           `).join('')}
         `).join('')}
         <button class="btn-sm btn-eliminar-sesion" id="btn-eliminar-rutina" style="margin-top:12px;">Eliminar rutina</button>
@@ -1053,6 +1093,7 @@ async function renderCoachAlumnoDetail(alumnoId){
           series_objetivo: ex.series_objetivo != null ? String(ex.series_objetivo) : '',
           reps_objetivo: ex.reps_objetivo || '',
           peso_objetivo: ex.peso_objetivo || '',
+          nota: ex.nota || '',
           descanso_seg: ex.descanso_seg != null ? String(ex.descanso_seg) : ''
         }))
       }));
@@ -1094,7 +1135,7 @@ function renderRutinaEditor(alumno, prefill, editingRutinaId){
   rutinaEditorId = editingRutinaId || null;
   rutinaEditorDias = (prefill && prefill.dias && prefill.dias.length)
     ? prefill.dias.map(d => ({ nombre: d.nombre, ejercicios: d.ejercicios.map(ex => ({...ex})) }))
-    : [{ nombre: 'Día 1', ejercicios: [{ nombre:'', series_objetivo:'', reps_objetivo:'', peso_objetivo:'', descanso_seg:'' }] }];
+    : [{ nombre: 'Día 1', ejercicios: [{ nombre:'', series_objetivo:'', reps_objetivo:'', peso_objetivo:'', nota:'', descanso_seg:'' }] }];
 
   const titulo = rutinaEditorId ? 'Editar rutina' : (prefill ? 'Duplicar rutina' : 'Nueva rutina');
   const subtitulo = rutinaEditorId
@@ -1124,7 +1165,7 @@ function renderRutinaEditor(alumno, prefill, editingRutinaId){
   document.getElementById('btn-cancelar-rutina').onclick = () => renderCoachAlumnoDetail(alumno.id);
   document.getElementById('btn-agregar-dia').onclick = () => {
     if(rutinaEditorDias.length >= 5){ showToast('Máximo 5 días por programa'); return; }
-    rutinaEditorDias.push({ nombre: `Día ${rutinaEditorDias.length + 1}`, ejercicios: [{ nombre:'', series_objetivo:'', reps_objetivo:'', peso_objetivo:'', descanso_seg:'' }] });
+    rutinaEditorDias.push({ nombre: `Día ${rutinaEditorDias.length + 1}`, ejercicios: [{ nombre:'', series_objetivo:'', reps_objetivo:'', peso_objetivo:'', nota:'', descanso_seg:'' }] });
     renderRutinaDiasEditor();
   };
   document.getElementById('btn-guardar-rutina').onclick = () => guardarRutina(alumno);
@@ -1156,19 +1197,23 @@ function renderRutinaDiasEditor(){
           <div><label>Reps</label><input type="text" value="${escapeHtml(row.reps_objetivo)}" oninput="rutinaEditorDias[${d}].ejercicios[${e}].reps_objetivo=this.value"></div>
           <div><label>Peso</label><input type="text" placeholder="Ej: 40 kg" value="${escapeHtml(row.peso_objetivo)}" oninput="rutinaEditorDias[${d}].ejercicios[${e}].peso_objetivo=this.value"></div>
         </div>
+        <div class="rutina-ex-nota-row">
+          <label>Nota técnica (opcional)</label>
+          <input type="text" placeholder="Ej: última serie al fallo, drop set, rest-pause..." value="${escapeHtml(row.nota)}" oninput="rutinaEditorDias[${d}].ejercicios[${e}].nota=this.value">
+        </div>
       </div>
     `).join('');
   });
 }
 
 function agregarEjercicioADia(d){
-  rutinaEditorDias[d].ejercicios.push({ nombre:'', series_objetivo:'', reps_objetivo:'', peso_objetivo:'', descanso_seg:'' });
+  rutinaEditorDias[d].ejercicios.push({ nombre:'', series_objetivo:'', reps_objetivo:'', peso_objetivo:'', nota:'', descanso_seg:'' });
   renderRutinaDiasEditor();
 }
 
 function quitarEjercicioDeDia(d, e){
   rutinaEditorDias[d].ejercicios.splice(e, 1);
-  if(!rutinaEditorDias[d].ejercicios.length) rutinaEditorDias[d].ejercicios.push({ nombre:'', series_objetivo:'', reps_objetivo:'', peso_objetivo:'', descanso_seg:'' });
+  if(!rutinaEditorDias[d].ejercicios.length) rutinaEditorDias[d].ejercicios.push({ nombre:'', series_objetivo:'', reps_objetivo:'', peso_objetivo:'', nota:'', descanso_seg:'' });
   renderRutinaDiasEditor();
 }
 
@@ -1190,6 +1235,7 @@ async function guardarRutina(alumno){
         series_objetivo: r.series_objetivo ? Number(r.series_objetivo) : null,
         reps_objetivo: r.reps_objetivo || null,
         peso_objetivo: (r.peso_objetivo || '').trim() || null,
+        nota: (r.nota || '').trim() || null,
         descanso_seg: r.descanso_seg ? Number(r.descanso_seg) : null,
         dia_nombre: nombreDia,
         dia_orden: di,
