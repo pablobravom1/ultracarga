@@ -260,7 +260,7 @@ async function renderAlumnoHome(){
   }
 
   renderCalendar('calendar-holder', fechas);
-  renderSesionesList('sesiones-list', conSeries, false);
+  renderSesionesList('sesiones-list', conSeries, false, renderAlumnoHome);
 
   if(conSeries.length) setupProgresoChart(conSeries);
 }
@@ -309,7 +309,7 @@ function irASesion(fecha){
   setTimeout(()=> el.classList.remove('highlight'), 1600);
 }
 
-function renderSesionesList(holderId, sesiones, isCoachView){
+function renderSesionesList(holderId, sesiones, isCoachView, onDeleted){
   const holder = document.getElementById(holderId);
   if(!sesiones.length){
     holder.innerHTML = `<div class="empty">Aún no hay entrenamientos registrados.</div>`;
@@ -340,10 +340,36 @@ function renderSesionesList(holderId, sesiones, isCoachView){
             <button class="btn-sm" onclick="guardarNotaCoach('${s.id}')">Guardar nota</button>
           </div>
         ` : (s.nota_coach ? `<div class="note-box"><div class="note-label">Nota del coach</div>${escapeHtml(s.nota_coach)}</div>` : '')}
+        <button class="btn-sm btn-eliminar-sesion" data-id="${s.id}" style="margin-top:12px;">Eliminar sesión</button>
       </div>
     </div>
   `;
   }).join('');
+
+  holder.querySelectorAll('.btn-eliminar-sesion').forEach(btn => {
+    btn.onclick = () => {
+      if(btn.dataset.confirm === '1'){
+        eliminarSesion(btn.dataset.id, onDeleted);
+      } else {
+        btn.dataset.confirm = '1';
+        btn.textContent = '¿Seguro? Toca de nuevo para eliminar';
+        btn.classList.add('btn-danger-confirm');
+        setTimeout(() => {
+          if(!btn.isConnected) return;
+          btn.dataset.confirm = '';
+          btn.textContent = 'Eliminar sesión';
+          btn.classList.remove('btn-danger-confirm');
+        }, 3000);
+      }
+    };
+  });
+}
+
+async function eliminarSesion(id, onDeleted){
+  const { error } = await sb.from('sesiones').delete().eq('id', id);
+  if(error){ showToast('No se pudo eliminar la sesión'); return; }
+  showToast('Sesión eliminada');
+  if(onDeleted) onDeleted();
 }
 
 function setupProgresoChart(sesiones){
@@ -669,7 +695,7 @@ async function renderCoachAlumnoDetail(alumnoId){
   `;
   document.getElementById('btn-volver').onclick = renderCoachHome;
   document.getElementById('btn-nueva-rutina').onclick = () => renderRutinaEditor(alumno);
-  renderSesionesList('sesiones-list', conSeries, true);
+  renderSesionesList('sesiones-list', conSeries, true, () => renderCoachAlumnoDetail(alumnoId));
 }
 
 async function guardarNotaCoach(sesionId){
