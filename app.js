@@ -31,7 +31,9 @@ const ICONS = {
   check: `<svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`,
   arrowLeft: `<svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>`,
   activity: `<svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>`,
-  camera: `<svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>`
+  camera: `<svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>`,
+  users: `<svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>`,
+  link: `<svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>`
 };
 // Markup del lado derecho de un botón-toggle: texto según estado + flecha que rota.
 function toggleStateHtml(closedTxt){
@@ -167,13 +169,17 @@ function renderExNota(ex){
 }
 
 // ---------- ARRANQUE ----------
+function esVistaCoach(role){
+  return role === 'coach' || role === 'profesor' || role === 'super_admin';
+}
+
 async function boot(){
   const { data } = await sb.auth.getSession();
   session = data.session;
   if(!session){ profile = null; renderAuth(); return; }
   await loadProfile();
   if(!profile){ renderAuth(); return; }
-  if(profile.role === 'coach') await renderCoachHome();
+  if(esVistaCoach(profile.role)) await renderCoachHome();
   else await renderAlumnoHome();
 }
 
@@ -232,7 +238,7 @@ async function handleLogin(){
   }
   session = data.session;
   await loadProfile();
-  if(profile.role === 'coach') renderCoachHome(); else renderAlumnoHome();
+  if(esVistaCoach(profile.role)) renderCoachHome(); else renderAlumnoHome();
 }
 
 async function handleSignup(){
@@ -245,8 +251,12 @@ async function handleSignup(){
   if(pass.length < 6){ showToast('La contraseña debe tener al menos 6 caracteres'); return; }
   const btn = document.getElementById('auth-submit');
   btn.disabled = true; btn.textContent = 'Creando...';
+  // Si la persona entró con un link de invitación (?ref=<id-del-profesor>),
+  // se lo mandamos al signup para que quede asignada automáticamente.
+  // Si no hay ref (la forma antigua de crear cuenta), sigue funcionando igual.
+  const refProfesor = new URLSearchParams(window.location.search).get('ref') || undefined;
   const { data, error } = await sb.auth.signUp({
-    email, password: pass, options: { data: { nombre } }
+    email, password: pass, options: { data: { nombre, profesor_id: refProfesor } }
   });
   btn.disabled = false; btn.textContent = 'Crear cuenta';
   if(error){
@@ -262,7 +272,7 @@ async function handleSignup(){
   session = data.session;
   await loadProfile();
   showToast('¡Cuenta creada!');
-  if(profile && profile.role === 'coach') renderCoachHome(); else renderAlumnoHome();
+  if(profile && esVistaCoach(profile.role)) renderCoachHome(); else renderAlumnoHome();
 }
 
 async function handleLogout(){
@@ -1086,18 +1096,29 @@ function duplicarRutinaComoNueva(alumno, rutinaVieja){
 // ============================================================
 async function renderCoachHome(){
   root().innerHTML = `<div class="loading">Cargando alumnos...</div>`;
-  const { data: alumnos, error } = await sb.from('profiles').select('*').eq('role', 'alumno').order('nombre');
+  const esSuperAdmin = profile.role === 'super_admin';
+
+  const [{ data: alumnos, error }, profesoresRes] = await Promise.all([
+    sb.from('profiles').select('*').eq('role', 'alumno').order('nombre'),
+    esSuperAdmin ? sb.from('profiles').select('*').eq('role', 'profesor').order('nombre') : Promise.resolve({ data: [] })
+  ]);
   if(error){ root().innerHTML = `<div class="error-banner">No se pudo cargar la lista de alumnos.</div>`; return; }
+  const profesores = profesoresRes.data || [];
 
   const conUltima = await Promise.all((alumnos||[]).map(async a => {
     const { data } = await sb.from('sesiones').select('fecha').eq('alumno_id', a.id).order('fecha', { ascending:false }).limit(1);
     return { ...a, ultima: data && data[0] ? data[0].fecha : null };
   }));
 
+  const nombreProfesor = (profesorId) => {
+    const p = profesores.find(p => p.id === profesorId);
+    return p ? p.nombre : null;
+  };
+
   root().innerHTML = `
     <div class="header-actions">
       <div>
-        <h1 style="font-size:20px;">Vista Coach</h1>
+        <h1 style="font-size:20px;">${esSuperAdmin ? 'Vista Super Admin' : 'Vista Profesor'}</h1>
         <div class="sub" style="margin-bottom:0;">Selecciona un alumno para ver su registro</div>
       </div>
       <button class="switch-user" id="btn-logout">${ICONS.logout} Salir</button>
@@ -1105,9 +1126,22 @@ async function renderCoachHome(){
     <div class="card" style="font-size:12.5px; color:var(--chalk-dim);">
       Para que un alumno nuevo entre, compártele el link de la app: te va a pedir crear su cuenta con su correo la primera vez.
     </div>
+    ${esSuperAdmin ? `
+      <button class="btn-toggle-rutina" id="btn-toggle-profesores">
+        <span class="toggle-label">${ICONS.users} Gestión de profesores</span>
+        ${toggleStateHtml()}
+      </button>
+      <div class="hidden" id="profesores-holder"></div>
+    ` : ''}
     <div id="coach-alumnos-list"></div>
   `;
   document.getElementById('btn-logout').onclick = handleLogout;
+
+  if(esSuperAdmin){
+    wireToggle('btn-toggle-profesores', 'profesores-holder', () => {
+      renderGestionProfesores('profesores-holder', profesores, conUltima, renderCoachHome);
+    });
+  }
 
   const listEl = document.getElementById('coach-alumnos-list');
   if(!conUltima.length){
@@ -1115,14 +1149,88 @@ async function renderCoachHome(){
     return;
   }
   listEl.innerHTML = conUltima.map(a => `
-    <div class="coach-list-item" onclick="renderCoachAlumnoDetail('${a.id}')">
-      <div>
+    <div class="coach-list-item">
+      <div style="flex:1; min-width:0; cursor:pointer;" onclick="renderCoachAlumnoDetail('${a.id}')">
         <div class="coach-name">${escapeHtml(a.nombre)}</div>
-        <div class="coach-meta">${a.ultima ? 'Última sesión: ' + formatDateShort(a.ultima) : 'Sin sesiones todavía'}</div>
+        <div class="coach-meta">${a.ultima ? 'Última sesión: ' + formatDateShort(a.ultima) : 'Sin sesiones todavía'}${esSuperAdmin ? ' · ' + (nombreProfesor(a.profesor_id) ? escapeHtml(nombreProfesor(a.profesor_id)) : 'Sin profesor asignado') : ''}</div>
       </div>
-      <span class="pill">Ver ${ICONS.chevronRight}</span>
+      ${esSuperAdmin ? `
+        <select class="select-inline select-asignar-profesor" data-alumno="${a.id}">
+          <option value="">Sin asignar</option>
+          ${profesores.map(p => `<option value="${p.id}" ${a.profesor_id === p.id ? 'selected' : ''}>${escapeHtml(p.nombre)}</option>`).join('')}
+        </select>
+      ` : ''}
+      <span class="pill" style="cursor:pointer;" onclick="renderCoachAlumnoDetail('${a.id}')">Ver ${ICONS.chevronRight}</span>
     </div>
   `).join('');
+
+  if(esSuperAdmin){
+    listEl.querySelectorAll('.select-asignar-profesor').forEach(sel => {
+      sel.onclick = (e) => e.stopPropagation();
+      sel.onchange = async () => {
+        const alumnoId = sel.dataset.alumno;
+        const nuevoProfesorId = sel.value || null;
+        const { error } = await sb.from('profiles').update({ profesor_id: nuevoProfesorId }).eq('id', alumnoId);
+        if(error){ showToast('No se pudo asignar: ' + error.message); return; }
+        showToast('Profesor asignado');
+        renderCoachHome();
+      };
+    });
+  }
+}
+
+// ---------- GESTIÓN DE PROFESORES (solo super admin) ----------
+function renderGestionProfesores(holderId, profesores, alumnos, onCambio){
+  const holder = document.getElementById(holderId);
+  const conteos = {};
+  (alumnos||[]).forEach(a => { if(a.profesor_id) conteos[a.profesor_id] = (conteos[a.profesor_id] || 0) + 1; });
+  const linkBase = `${window.location.origin}${window.location.pathname}`;
+  const alumnosSinProfesor = (alumnos||[]).filter(a => a.role !== 'profesor');
+
+  holder.innerHTML = `
+    <div class="card" style="margin-bottom:16px;">
+      <label style="margin-bottom:8px; display:block;">Profesores</label>
+      ${profesores.length ? profesores.map(p => `
+        <div class="coach-list-item" style="cursor:default; align-items:flex-start;">
+          <div style="flex:1; min-width:0;">
+            <div class="coach-name">${escapeHtml(p.nombre)}</div>
+            <div class="coach-meta">${conteos[p.id] || 0} alumno${(conteos[p.id]||0) === 1 ? '' : 's'} asignado${(conteos[p.id]||0) === 1 ? '' : 's'}</div>
+          </div>
+          <button class="btn-sm btn-copiar-link" data-id="${p.id}">${ICONS.link} Copiar link</button>
+        </div>
+      `).join('') : `<div class="empty">Aún no hay profesores.</div>`}
+    </div>
+    <div class="card">
+      <label>Convertir un alumno en profesor</label>
+      <select id="select-nuevo-profesor">
+        <option value="">Elige un alumno...</option>
+        ${alumnosSinProfesor.map(a => `<option value="${a.id}">${escapeHtml(a.nombre)}</option>`).join('')}
+      </select>
+      <button class="btn-sm" id="btn-hacer-profesor">${ICONS.users} Hacer profesor</button>
+    </div>
+  `;
+
+  holder.querySelectorAll('.btn-copiar-link').forEach(btn => {
+    btn.onclick = async () => {
+      const link = `${linkBase}?ref=${btn.dataset.id}`;
+      try {
+        await navigator.clipboard.writeText(link);
+        showToast('Link copiado');
+      } catch(e){
+        showToast('No se pudo copiar. Link: ' + link);
+      }
+    };
+  });
+
+  document.getElementById('btn-hacer-profesor').onclick = async () => {
+    const sel = document.getElementById('select-nuevo-profesor');
+    const alumnoId = sel.value;
+    if(!alumnoId){ showToast('Elige un alumno primero'); return; }
+    const { error } = await sb.from('profiles').update({ role: 'profesor', profesor_id: null }).eq('id', alumnoId);
+    if(error){ showToast('No se pudo convertir: ' + error.message); return; }
+    showToast('Ahora es profesor');
+    if(onCambio) onCambio();
+  };
 }
 
 async function renderCoachAlumnoDetail(alumnoId){
