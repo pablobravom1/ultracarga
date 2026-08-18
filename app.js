@@ -271,7 +271,11 @@ async function renderAlumnoHome(){
 
     ${historialRutinas && historialRutinas.length ? `<button class="link-btn" id="btn-ver-mis-rutinas" style="margin-bottom:16px;">Ver rutinas anteriores (${historialRutinas.length}) →</button>` : ''}
 
-    <div id="calendar-holder"></div>
+    <button class="btn-toggle-rutina" id="btn-toggle-calendario">
+      <span>📅 Calendario</span>
+      <span id="calendario-toggle-icon">Ver →</span>
+    </button>
+    <div class="hidden" id="calendar-holder"></div>
 
     ${conSeries.length ? `
       <div class="chart-wrap">
@@ -300,6 +304,16 @@ async function renderAlumnoHome(){
   }
   if(historialRutinas && historialRutinas.length){
     document.getElementById('btn-ver-mis-rutinas').onclick = () => renderHistorialRutinas(profile, renderAlumnoHome, false);
+  }
+  {
+    const btnToggleCal = document.getElementById('btn-toggle-calendario');
+    const calHolder = document.getElementById('calendar-holder');
+    const calToggleIcon = document.getElementById('calendario-toggle-icon');
+    btnToggleCal.onclick = () => {
+      const abrir = calHolder.classList.contains('hidden');
+      calHolder.classList.toggle('hidden', !abrir);
+      calToggleIcon.textContent = abrir ? 'Ocultar ▲' : 'Ver →';
+    };
   }
 
   renderCalendar('calendar-holder', fechas);
