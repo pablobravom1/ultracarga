@@ -33,7 +33,8 @@ const ICONS = {
   activity: `<svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>`,
   camera: `<svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>`,
   users: `<svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>`,
-  link: `<svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>`
+  link: `<svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>`,
+  message: `<svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>`
 };
 // Markup del lado derecho de un botón-toggle: texto según estado + flecha que rota.
 function toggleStateHtml(closedTxt){
@@ -366,6 +367,12 @@ async function renderAlumnoHome(){
       ${toggleStateHtml()}
     </button>
     <div class="hidden" id="sesiones-list"></div>
+
+    <button class="btn-toggle-rutina" id="btn-toggle-opinar">
+      <span class="toggle-label">${ICONS.message} Opinar sobre el servicio</span>
+      ${toggleStateHtml()}
+    </button>
+    <div class="hidden" id="opinar-holder"></div>
   `;
 
   document.getElementById('btn-logout').onclick = handleLogout;
@@ -392,6 +399,7 @@ async function renderAlumnoHome(){
       if(!medicionesInicializado){ renderMediciones('mediciones-holder', profile.id); medicionesInicializado = true; }
     });
   }
+  wireToggle('btn-toggle-opinar', 'opinar-holder', () => renderOpinionForm('opinar-holder', profile.id));
 
   renderCalendar('calendar-holder', fechas);
   renderSesionesList('sesiones-list', conSeries, false, renderAlumnoHome);
@@ -597,6 +605,59 @@ async function eliminarMedicion(id, alumnoId, holderId){
   if(error){ showToast('No se pudo eliminar la medición'); return; }
   showToast('Medición eliminada');
   renderMediciones(holderId, alumnoId);
+}
+
+// ---------- OPINAR SOBRE EL SERVICIO (buzón privado alumno → super admin) ----------
+async function renderOpinionForm(holderId, alumnoId){
+  const holder = document.getElementById(holderId);
+  holder.innerHTML = `<div class="loading">Cargando...</div>`;
+  const { data: opiniones } = await sb.from('opiniones').select('*').eq('alumno_id', alumnoId).order('created_at', { ascending: false });
+  const listaHtml = (opiniones && opiniones.length)
+    ? opiniones.map(o => `
+      <div class="session-card">
+        <div class="session-head"><span>${formatDate(o.created_at.slice(0,10))}</span></div>
+        <div class="session-body"><div class="sub" style="margin-bottom:0;">${escapeHtml(o.mensaje)}</div></div>
+      </div>
+    `).join('')
+    : `<div class="empty">Todavía no has enviado ningún mensaje.</div>`;
+  holder.innerHTML = `
+    <div class="card" style="margin-bottom:16px;">
+      <div class="sub" style="margin-bottom:12px;">Este mensaje lo lee directamente Pablo — tu profesor no lo ve. Úsalo para contarle cómo va el servicio, la infraestructura, o cualquier sugerencia.</div>
+      <label>Tu mensaje</label>
+      <textarea id="input-opinion" placeholder="Escribe aquí..." rows="4"></textarea>
+      <button class="btn" id="btn-enviar-opinion">${ICONS.message} Enviar</button>
+    </div>
+    ${listaHtml}
+  `;
+  document.getElementById('btn-enviar-opinion').onclick = () => enviarOpinion(alumnoId, holderId);
+}
+
+async function enviarOpinion(alumnoId, holderId){
+  const textarea = document.getElementById('input-opinion');
+  const mensaje = textarea.value.trim();
+  if(!mensaje){ showToast('Escribe un mensaje primero'); return; }
+  const btn = document.getElementById('btn-enviar-opinion');
+  btn.disabled = true; btn.textContent = 'Enviando...';
+  const { error } = await sb.from('opiniones').insert({ alumno_id: alumnoId, mensaje });
+  if(error){ showToast('No se pudo enviar: ' + error.message); btn.disabled = false; btn.innerHTML = `${ICONS.message} Enviar`; return; }
+  showToast('¡Gracias! Tu mensaje fue enviado.');
+  renderOpinionForm(holderId, alumnoId);
+}
+
+// ---------- BUZÓN DE SUGERENCIAS (solo super admin) ----------
+async function renderBuzonOpiniones(holderId){
+  const holder = document.getElementById(holderId);
+  holder.innerHTML = `<div class="loading">Cargando...</div>`;
+  const { data: opiniones, error } = await sb.from('opiniones').select('*, profiles(nombre)').order('created_at', { ascending: false });
+  if(error){ holder.innerHTML = `<div class="error-banner">No se pudo cargar el buzón.</div>`; return; }
+  holder.innerHTML = (opiniones && opiniones.length)
+    ? opiniones.map(o => `
+      <div class="session-card">
+        <div class="session-head"><span>${escapeHtml(o.profiles ? o.profiles.nombre : 'Alumno')}</span><span>${formatDateShort(o.created_at.slice(0,10))}</span></div>
+        <div class="session-body"><div class="sub" style="margin-bottom:0;">${escapeHtml(o.mensaje)}</div></div>
+      </div>
+    `).join('')
+    : `<div class="empty">Todavía no hay mensajes en el buzón.</div>`;
 }
 
 function setupProgresoChart(sesiones){
@@ -1132,6 +1193,12 @@ async function renderCoachHome(){
         ${toggleStateHtml()}
       </button>
       <div class="hidden" id="profesores-holder"></div>
+
+      <button class="btn-toggle-rutina" id="btn-toggle-buzon">
+        <span class="toggle-label">${ICONS.message} Buzón de sugerencias</span>
+        ${toggleStateHtml()}
+      </button>
+      <div class="hidden" id="buzon-holder"></div>
     ` : ''}
     <div id="coach-alumnos-list"></div>
   `;
@@ -1141,6 +1208,7 @@ async function renderCoachHome(){
     wireToggle('btn-toggle-profesores', 'profesores-holder', () => {
       renderGestionProfesores('profesores-holder', profesores, conUltima, renderCoachHome);
     });
+    wireToggle('btn-toggle-buzon', 'buzon-holder', () => renderBuzonOpiniones('buzon-holder'));
   }
 
   const listEl = document.getElementById('coach-alumnos-list');
