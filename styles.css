@@ -25,6 +25,7 @@ input:focus, select:focus, textarea:focus{outline:none; border-color:var(--blue)
 .btn-orange{background:var(--orange);}
 .btn-ghost{width:100%; background:none; color:var(--chalk-dim); border:1px solid var(--line); font-family:'Inter'; font-size:12.5px; padding:11px; border-radius:4px; cursor:pointer; margin-top:8px;}
 .btn-sm{display:inline-flex; align-items:center; gap:6px; background:var(--surface-2); color:var(--chalk); border:1px solid var(--line); font-family:'Inter'; font-size:12px; padding:8px 12px; border-radius:4px; cursor:pointer;}
+.btn-sm:disabled{opacity:0.4; cursor:not-allowed;}
 .btn-eliminar-sesion{background:none; color:var(--chalk-dim); display:block; width:100%;}
 .btn-eliminar-sesion.btn-danger-confirm{background:var(--orange); color:var(--ink); border-color:var(--orange); font-weight:700;}
 .btn-sm.btn-danger-confirm{background:var(--orange); color:var(--ink); border-color:var(--orange); font-weight:700;}

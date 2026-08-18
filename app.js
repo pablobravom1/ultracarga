@@ -1375,6 +1375,16 @@ async function renderCoachAlumnoDetail(alumnoId){
       ${toggleStateHtml()}
     </button>
     <div class="hidden" id="sesiones-list"></div>
+
+    ${profile.role === 'super_admin' ? `
+      <div class="card" style="margin-top:24px; border-color:var(--orange);">
+        <h2 style="color:var(--orange);">Zona de peligro</h2>
+        <div class="sub">Esto borra la cuenta de ${escapeHtml(alumno.nombre)} para siempre: su rutina, todas sus sesiones, mediciones y mensajes. No se puede deshacer.</div>
+        <label>Escribe "${escapeHtml(alumno.nombre)}" para confirmar</label>
+        <input type="text" id="input-confirmar-eliminar-alumno" placeholder="${escapeHtml(alumno.nombre)}" autocomplete="off">
+        <button class="btn-sm btn-eliminar-sesion" id="btn-eliminar-alumno" disabled style="width:100%; justify-content:center;">Eliminar alumno</button>
+      </div>
+    ` : ''}
   `;
   document.getElementById('btn-volver').onclick = renderCoachHome;
   document.getElementById('btn-nueva-rutina').onclick = () => renderRutinaEditor(alumno);
@@ -1428,6 +1438,28 @@ async function renderCoachAlumnoDetail(alumnoId){
     };
   }
   renderSesionesList('sesiones-list', conSeries, true, () => renderCoachAlumnoDetail(alumnoId));
+
+  if(profile.role === 'super_admin'){
+    const inputConfirmar = document.getElementById('input-confirmar-eliminar-alumno');
+    const btnElimAlumno = document.getElementById('btn-eliminar-alumno');
+    const nombreObjetivo = alumno.nombre.trim().toLowerCase();
+    inputConfirmar.oninput = () => {
+      btnElimAlumno.disabled = inputConfirmar.value.trim().toLowerCase() !== nombreObjetivo;
+    };
+    btnElimAlumno.onclick = () => eliminarAlumno(alumnoId, alumno.nombre, btnElimAlumno);
+  }
+}
+
+async function eliminarAlumno(alumnoId, nombre, btn){
+  btn.disabled = true; btn.textContent = 'Eliminando...';
+  const { error } = await sb.rpc('eliminar_alumno', { target_id: alumnoId });
+  if(error){
+    showToast('No se pudo eliminar: ' + error.message);
+    btn.disabled = false; btn.textContent = 'Eliminar alumno';
+    return;
+  }
+  showToast(`Cuenta de ${nombre} eliminada`);
+  renderCoachHome();
 }
 
 async function guardarNotaCoach(sesionId){
