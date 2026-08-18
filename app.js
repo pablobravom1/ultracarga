@@ -17,6 +17,58 @@ let progresoChart = null;
 
 const root = () => document.getElementById('app-root');
 
+// ---------- ICONOGRAFÍA (SVG inline, heredan el color del texto) ----------
+const ICONS = {
+  chevron: `<svg class="icon icon-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`,
+  chevronRight: `<svg class="icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>`,
+  clipboard: `<svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect><line x1="8" y1="11" x2="16" y2="11"></line><line x1="8" y1="15" x2="13" y2="15"></line></svg>`,
+  calendar: `<svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>`,
+  trending: `<svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>`,
+  book: `<svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4.5h6a3.5 3.5 0 0 1 3.5 3.5v13a2.5 2.5 0 0 0-2.5-2.5H2z"></path><path d="M22 4.5h-6a3.5 3.5 0 0 0-3.5 3.5v13a2.5 2.5 0 0 1 2.5-2.5H22z"></path></svg>`,
+  logout: `<svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>`,
+  download: `<svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>`,
+  plus: `<svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`,
+  check: `<svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`,
+  arrowLeft: `<svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>`
+};
+// Markup del lado derecho de un botón-toggle: texto según estado + flecha que rota.
+function toggleStateHtml(closedTxt){
+  closedTxt = closedTxt || 'Ver';
+  return `<span class="toggle-state"><span class="txt-closed">${closedTxt}</span><span class="txt-open">Ocultar</span>${ICONS.chevron}</span>`;
+}
+// Abre/cierra una sección colapsable: pone .open en el botón, saca/pone .hidden en el contenedor,
+// y dispara una pequeña animación de aparición.
+function setToggleOpen(btnId, holderId, abrir){
+  const btn = document.getElementById(btnId);
+  const holder = document.getElementById(holderId);
+  if(!btn || !holder) return;
+  btn.classList.toggle('open', abrir);
+  holder.classList.toggle('hidden', !abrir);
+  if(abrir){
+    holder.classList.remove('reveal-in');
+    void holder.offsetWidth;
+    holder.classList.add('reveal-in');
+  }
+}
+// Conecta un botón-toggle con su contenedor. onOpen (opcional) corre solo al abrir
+// (útil para inicializar el gráfico de progreso recién cuando se ve por primera vez).
+function wireToggle(btnId, holderId, onOpen){
+  const btn = document.getElementById(btnId);
+  const holder = document.getElementById(holderId);
+  if(!btn || !holder) return;
+  btn.onclick = () => {
+    const abrir = holder.classList.contains('hidden');
+    setToggleOpen(btnId, holderId, abrir);
+    if(abrir && onOpen) onOpen();
+  };
+}
+function hideSplash(){
+  const el = document.getElementById('splash');
+  if(!el) return;
+  el.classList.add('hide');
+  setTimeout(() => el.remove(), 400);
+}
+
 // ---------- HELPERS ----------
 function showToast(msg){
   const t = document.getElementById('toast');
@@ -119,8 +171,8 @@ async function boot(){
   if(!session){ profile = null; renderAuth(); return; }
   await loadProfile();
   if(!profile){ renderAuth(); return; }
-  if(profile.role === 'coach') renderCoachHome();
-  else renderAlumnoHome();
+  if(profile.role === 'coach') await renderCoachHome();
+  else await renderAlumnoHome();
 }
 
 async function loadProfile(){
@@ -242,7 +294,7 @@ async function renderAlumnoHome(){
         <h1 style="font-size:20px;">Hola, ${escapeHtml(profile.nombre.split(' ')[0])}</h1>
         <div class="sub" style="margin-bottom:0;">Tu registro de entrenamiento</div>
       </div>
-      <button class="switch-user" id="btn-logout">Salir</button>
+      <button class="switch-user" id="btn-logout">${ICONS.logout} Salir</button>
     </div>
 
     <div class="streak-row">
@@ -250,17 +302,17 @@ async function renderAlumnoHome(){
       <div class="stat-tile"><div class="num">${conSeries.length}</div><div class="label">sesiones totales</div></div>
     </div>
 
-    <button class="btn" id="btn-nueva-sesion" style="margin-bottom:16px;">${hayEntrenamientoHoy ? '+ Seguir con el entrenamiento de hoy' : '+ Nueva sesión de hoy'}</button>
+    <button class="btn" id="btn-nueva-sesion" style="margin-bottom:16px;">${ICONS.plus} ${hayEntrenamientoHoy ? 'Seguir con el entrenamiento de hoy' : 'Nueva sesión de hoy'}</button>
 
     ${rutina ? `
       <button class="btn-toggle-rutina" id="btn-toggle-rutina">
-        <span>📋 Rutina: ${escapeHtml(rutina.nombre)}</span>
-        <span id="rutina-toggle-icon">Ver →</span>
+        <span class="toggle-label">${ICONS.clipboard} Rutina: ${escapeHtml(rutina.nombre)}</span>
+        ${toggleStateHtml()}
       </button>
       <div class="card hidden" id="rutina-detail-card">
         <div class="row-flex" style="margin-bottom:6px;">
           <h2 style="margin:0;">${escapeHtml(rutina.nombre)}</h2>
-          <button class="btn-sm" id="btn-pdf-rutina">Descargar PDF</button>
+          <button class="btn-sm" id="btn-pdf-rutina">${ICONS.download} Descargar PDF</button>
         </div>
         ${rutina.objetivo ? `<div class="sub" style="margin-bottom:12px;">${escapeHtml(rutina.objetivo)}</div>` : ''}
         ${activeRutinaDias.map(d => `
@@ -275,15 +327,15 @@ async function renderAlumnoHome(){
     ${historialRutinas && historialRutinas.length ? `<button class="link-btn" id="btn-ver-mis-rutinas" style="margin-bottom:16px;">Ver rutinas anteriores (${historialRutinas.length}) →</button>` : ''}
 
     <button class="btn-toggle-rutina" id="btn-toggle-calendario">
-      <span>📅 Calendario</span>
-      <span id="calendario-toggle-icon">Ver →</span>
+      <span class="toggle-label">${ICONS.calendar} Calendario</span>
+      ${toggleStateHtml()}
     </button>
     <div class="hidden" id="calendar-holder"></div>
 
     ${conSeries.length ? `
       <button class="btn-toggle-rutina" id="btn-toggle-progreso">
-        <span>📈 Progresión por ejercicio</span>
-        <span id="progreso-toggle-icon">Ver →</span>
+        <span class="toggle-label">${ICONS.trending} Progresión por ejercicio</span>
+        ${toggleStateHtml()}
       </button>
       <div class="chart-wrap hidden" id="progreso-wrap">
         <select id="progreso-select" style="margin-bottom:10px;"></select>
@@ -292,8 +344,8 @@ async function renderAlumnoHome(){
     ` : ''}
 
     <button class="btn-toggle-rutina" id="btn-toggle-historial">
-      <span>📖 Historial de entrenamiento</span>
-      <span id="historial-toggle-icon">Ver →</span>
+      <span class="toggle-label">${ICONS.book} Historial de entrenamiento</span>
+      ${toggleStateHtml()}
     </button>
     <div class="hidden" id="sesiones-list"></div>
   `;
@@ -302,52 +354,19 @@ async function renderAlumnoHome(){
   document.getElementById('btn-nueva-sesion').onclick = () => iniciarNuevaSesion(rutina);
   if(rutina){
     document.getElementById('btn-pdf-rutina').onclick = () => descargarRutinaPDF(rutina, activeRutinaDias);
-    const btnToggleRutina = document.getElementById('btn-toggle-rutina');
-    const rutinaDetailCard = document.getElementById('rutina-detail-card');
-    const rutinaToggleIcon = document.getElementById('rutina-toggle-icon');
-    btnToggleRutina.onclick = () => {
-      const abrir = rutinaDetailCard.classList.contains('hidden');
-      rutinaDetailCard.classList.toggle('hidden', !abrir);
-      rutinaToggleIcon.textContent = abrir ? 'Ocultar ▲' : 'Ver →';
-    };
+    wireToggle('btn-toggle-rutina', 'rutina-detail-card');
   }
   if(historialRutinas && historialRutinas.length){
     document.getElementById('btn-ver-mis-rutinas').onclick = () => renderHistorialRutinas(profile, renderAlumnoHome, false);
   }
-  {
-    const btnToggleCal = document.getElementById('btn-toggle-calendario');
-    const calHolder = document.getElementById('calendar-holder');
-    const calToggleIcon = document.getElementById('calendario-toggle-icon');
-    btnToggleCal.onclick = () => {
-      const abrir = calHolder.classList.contains('hidden');
-      calHolder.classList.toggle('hidden', !abrir);
-      calToggleIcon.textContent = abrir ? 'Ocultar ▲' : 'Ver →';
-    };
-  }
-  {
-    const btnToggleHist = document.getElementById('btn-toggle-historial');
-    const histHolder = document.getElementById('sesiones-list');
-    const histToggleIcon = document.getElementById('historial-toggle-icon');
-    btnToggleHist.onclick = () => {
-      const abrir = histHolder.classList.contains('hidden');
-      histHolder.classList.toggle('hidden', !abrir);
-      histToggleIcon.textContent = abrir ? 'Ocultar ▲' : 'Ver →';
-    };
-  }
+  wireToggle('btn-toggle-calendario', 'calendar-holder');
+  wireToggle('btn-toggle-historial', 'sesiones-list');
   if(conSeries.length){
     let progresoInicializado = false;
-    const btnToggleProgreso = document.getElementById('btn-toggle-progreso');
-    const progresoWrap = document.getElementById('progreso-wrap');
-    const progresoToggleIcon = document.getElementById('progreso-toggle-icon');
-    btnToggleProgreso.onclick = () => {
-      const abrir = progresoWrap.classList.contains('hidden');
-      progresoWrap.classList.toggle('hidden', !abrir);
-      progresoToggleIcon.textContent = abrir ? 'Ocultar ▲' : 'Ver →';
-      if(abrir){
-        if(!progresoInicializado){ setupProgresoChart(conSeries); progresoInicializado = true; }
-        else if(progresoChart){ progresoChart.resize(); }
-      }
-    };
+    wireToggle('btn-toggle-progreso', 'progreso-wrap', () => {
+      if(!progresoInicializado){ setupProgresoChart(conSeries); progresoInicializado = true; }
+      else if(progresoChart){ progresoChart.resize(); }
+    });
   }
 
   renderCalendar('calendar-holder', fechas);
@@ -395,9 +414,7 @@ function irASesion(fecha){
   if(!el) return;
   const holder = el.closest('.hidden');
   if(holder){
-    holder.classList.remove('hidden');
-    const icon = document.getElementById('historial-toggle-icon');
-    if(icon) icon.textContent = 'Ocultar ▲';
+    setToggleOpen('btn-toggle-historial', holder.id, true);
   }
   el.scrollIntoView({ behavior:'smooth', block:'center' });
   el.classList.add('highlight');
@@ -569,8 +586,8 @@ function renderNuevaSesionForm(){
 
     ${activeRutinaDias.length ? `
       <button type="button" class="btn-toggle-rutina" id="btn-toggle-dia">
-        <span>📅 ${activeSesionDia ? 'Día: ' + escapeHtml(activeSesionDia) : '¿Qué día de tu programa entrenas hoy?'}</span>
-        <span id="dia-toggle-icon">${activeSesionDia ? 'Cambiar' : 'Elegir →'}</span>
+        <span class="toggle-label">${ICONS.calendar} ${activeSesionDia ? 'Día: ' + escapeHtml(activeSesionDia) : '¿Qué día de tu programa entrenas hoy?'}</span>
+        ${toggleStateHtml(activeSesionDia ? 'Cambiar' : 'Elegir')}
       </button>
       <div class="hidden" id="dia-picker-holder" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px;">
         ${activeRutinaDias.map(d => `<button type="button" class="dia-btn ${activeSesionDia === d.nombre ? 'selected' : ''}" onclick="seleccionarDiaSesion('${escapeHtml(d.nombre).replace(/'/g,"\\'")}')">${escapeHtml(d.nombre)}</button>`).join('')}
@@ -602,20 +619,13 @@ function renderNuevaSesionForm(){
         <input type="file" id="input-foto" accept="image/*">
       </label>
       <div class="sub" style="margin-top:0;">Toca esto recién cuando termines <b>todos</b> los ejercicios de hoy:</div>
-      <button class="btn" id="btn-finalizar-sesion">✓ Finalizar entrenamiento de hoy</button>
+      <button class="btn" id="btn-finalizar-sesion">${ICONS.check} Finalizar entrenamiento de hoy</button>
     </div>
   `;
   document.getElementById('btn-cancelar-sesion').onclick = cancelarSesion;
   document.getElementById('input-fecha-sesion').onchange = actualizarFechaSesion;
   if(activeRutinaDias.length){
-    const btnToggleDia = document.getElementById('btn-toggle-dia');
-    const diaPickerHolder = document.getElementById('dia-picker-holder');
-    const diaToggleIcon = document.getElementById('dia-toggle-icon');
-    btnToggleDia.onclick = () => {
-      const abrir = diaPickerHolder.classList.contains('hidden');
-      diaPickerHolder.classList.toggle('hidden', !abrir);
-      diaToggleIcon.textContent = abrir ? 'Ocultar ▲' : (activeSesionDia ? 'Cambiar' : 'Elegir →');
-    };
+    wireToggle('btn-toggle-dia', 'dia-picker-holder');
   }
   document.getElementById('btn-agregar-ejercicio').onclick = () => agregarBloqueEjercicio();
   document.getElementById('input-nuevo-ejercicio').onkeydown = (e) => { if(e.key === 'Enter'){ e.preventDefault(); agregarBloqueEjercicio(); } };
@@ -883,7 +893,7 @@ async function renderHistorialRutinas(alumno, volverFn, permitirDuplicar){
         <h1 style="font-size:20px;">Rutinas anteriores</h1>
         <div class="sub" style="margin-bottom:0;">${escapeHtml(alumno.nombre)}</div>
       </div>
-      <button class="switch-user" id="btn-volver-historial">← Volver</button>
+      <button class="switch-user" id="btn-volver-historial">${ICONS.arrowLeft} Volver</button>
     </div>
     <div id="historial-rutinas-list"></div>
   `;
@@ -988,7 +998,7 @@ async function renderCoachHome(){
         <h1 style="font-size:20px;">Vista Coach</h1>
         <div class="sub" style="margin-bottom:0;">Selecciona un alumno para ver su registro</div>
       </div>
-      <button class="switch-user" id="btn-logout">Salir</button>
+      <button class="switch-user" id="btn-logout">${ICONS.logout} Salir</button>
     </div>
     <div class="card" style="font-size:12.5px; color:var(--chalk-dim);">
       Para que un alumno nuevo entre, compártele el link de la app: te va a pedir crear su cuenta con su correo la primera vez.
@@ -1008,7 +1018,7 @@ async function renderCoachHome(){
         <div class="coach-name">${escapeHtml(a.nombre)}</div>
         <div class="coach-meta">${a.ultima ? 'Última sesión: ' + formatDateShort(a.ultima) : 'Sin sesiones todavía'}</div>
       </div>
-      <span class="pill">Ver →</span>
+      <span class="pill">Ver ${ICONS.chevronRight}</span>
     </div>
   `).join('');
 }
@@ -1032,13 +1042,13 @@ async function renderCoachAlumnoDetail(alumnoId){
         <h1 style="font-size:20px;">${escapeHtml(alumno.nombre)}</h1>
         <div class="sub" style="margin-bottom:0;">Registro de entrenamiento</div>
       </div>
-      <button class="switch-user" id="btn-volver">← Volver</button>
+      <button class="switch-user" id="btn-volver">${ICONS.arrowLeft} Volver</button>
     </div>
 
     ${rutina ? `
       <button class="btn-toggle-rutina" id="btn-toggle-rutina">
-        <span>📋 Rutina: ${escapeHtml(rutina.nombre)}</span>
-        <span id="rutina-toggle-icon">Ver →</span>
+        <span class="toggle-label">${ICONS.clipboard} Rutina: ${escapeHtml(rutina.nombre)}</span>
+        ${toggleStateHtml()}
       </button>
     ` : `
       <div class="card">
@@ -1075,14 +1085,7 @@ async function renderCoachAlumnoDetail(alumnoId){
   document.getElementById('btn-volver').onclick = renderCoachHome;
   document.getElementById('btn-nueva-rutina').onclick = () => renderRutinaEditor(alumno);
   if(rutina){
-    const btnToggleRutina = document.getElementById('btn-toggle-rutina');
-    const rutinaDetailCard = document.getElementById('rutina-detail-card');
-    const rutinaToggleIcon = document.getElementById('rutina-toggle-icon');
-    btnToggleRutina.onclick = () => {
-      const abrir = rutinaDetailCard.classList.contains('hidden');
-      rutinaDetailCard.classList.toggle('hidden', !abrir);
-      rutinaToggleIcon.textContent = abrir ? 'Ocultar ▲' : 'Ver →';
-    };
+    wireToggle('btn-toggle-rutina', 'rutina-detail-card');
   }
   if(rutina){
     document.getElementById('btn-editar-rutina').onclick = () => {
@@ -1280,4 +1283,8 @@ async function guardarRutina(alumno){
 }
 
 // ---------- ARRANCA LA APP ----------
-boot();
+const _splashStart = Date.now();
+boot().finally(() => {
+  const wait = Math.max(0, 500 - (Date.now() - _splashStart));
+  setTimeout(hideSplash, wait);
+});
