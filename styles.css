@@ -86,9 +86,13 @@ input:focus, select:focus, textarea:focus{outline:none; border-color:var(--blue)
 .exercise-group .ex-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;}
 .exercise-group .ex-name{font-size:12.5px; font-weight:600;}
 
-.rutina-ex-row{display:grid; grid-template-columns:2fr 1fr 1fr auto; gap:8px; align-items:end; margin-bottom:10px;}
-.rutina-ex-row input{margin-bottom:0;}
-.remove-x{background:none; border:1px solid var(--line); color:var(--chalk-dim); border-radius:4px; cursor:pointer; height:41px; width:41px;}
+.rutina-ex-card{background:var(--ink); border:1px solid var(--line); border-radius:4px; padding:10px 12px; margin-bottom:10px;}
+.rutina-ex-top{display:flex; gap:8px; align-items:center;}
+.rutina-ex-top input{margin-bottom:0; flex:1;}
+.rutina-ex-meta{display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-top:8px;}
+.rutina-ex-meta input{margin-bottom:0;}
+.rutina-ex-meta label{margin-bottom:4px;}
+.remove-x{background:none; border:1px solid var(--line); color:var(--chalk-dim); border-radius:4px; cursor:pointer; height:41px; width:41px; flex-shrink:0;}
 
 .chart-wrap{background:var(--surface); border:1px solid var(--line); border-radius:6px; padding:16px; margin-bottom:16px;}
 .chart-wrap canvas{max-height:220px;}
@@ -98,6 +102,9 @@ input:focus, select:focus, textarea:focus{outline:none; border-color:var(--blue)
 
 .auth-switch{text-align:center; margin-top:14px; font-size:12.5px; color:var(--chalk-dim);}
 .auth-switch button{background:none; border:none; color:var(--blue); text-decoration:underline; cursor:pointer; font-size:12.5px;}
+
+.btn-toggle-rutina{width:100%; display:flex; justify-content:space-between; align-items:center; background:var(--surface); border:1px solid var(--line); color:var(--chalk); font-family:'Oswald'; font-size:13.5px; letter-spacing:0.02em; padding:14px 16px; border-radius:6px; cursor:pointer; margin-bottom:16px;}
+.btn-toggle-rutina span:last-child{font-size:11.5px; color:var(--blue); font-family:'Inter'; font-weight:600; white-space:nowrap;}
 
 .dia-btn{background:var(--surface-2); color:var(--chalk); border:1px solid var(--line); font-family:'Inter'; font-size:12.5px; padding:9px 14px; border-radius:4px; cursor:pointer;}
 .dia-btn.selected{background:var(--blue); color:var(--ink); border-color:var(--blue); font-weight:700;}
