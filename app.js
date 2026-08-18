@@ -516,8 +516,11 @@ function renderNuevaSesionForm(){
     <div class="sub" style="margin-top:-10px;">Agrega un ejercicio, sumale sus series, y agrega otro ejercicio si te falta — todo queda en el mismo entrenamiento hasta que finalices.</div>
 
     ${activeRutinaDias.length ? `
-      <div class="sub" style="margin-bottom:8px;">¿Qué día de tu programa entrenas hoy?</div>
-      <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px;">
+      <button type="button" class="btn-toggle-rutina" id="btn-toggle-dia">
+        <span>📅 ${activeSesionDia ? 'Día: ' + escapeHtml(activeSesionDia) : '¿Qué día de tu programa entrenas hoy?'}</span>
+        <span id="dia-toggle-icon">${activeSesionDia ? 'Cambiar' : 'Elegir →'}</span>
+      </button>
+      <div class="hidden" id="dia-picker-holder" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px;">
         ${activeRutinaDias.map(d => `<button type="button" class="dia-btn ${activeSesionDia === d.nombre ? 'selected' : ''}" onclick="seleccionarDiaSesion('${escapeHtml(d.nombre).replace(/'/g,"\\'")}')">${escapeHtml(d.nombre)}</button>`).join('')}
       </div>
     ` : ''}
@@ -552,6 +555,16 @@ function renderNuevaSesionForm(){
   `;
   document.getElementById('btn-cancelar-sesion').onclick = cancelarSesion;
   document.getElementById('input-fecha-sesion').onchange = actualizarFechaSesion;
+  if(activeRutinaDias.length){
+    const btnToggleDia = document.getElementById('btn-toggle-dia');
+    const diaPickerHolder = document.getElementById('dia-picker-holder');
+    const diaToggleIcon = document.getElementById('dia-toggle-icon');
+    btnToggleDia.onclick = () => {
+      const abrir = diaPickerHolder.classList.contains('hidden');
+      diaPickerHolder.classList.toggle('hidden', !abrir);
+      diaToggleIcon.textContent = abrir ? 'Ocultar ▲' : (activeSesionDia ? 'Cambiar' : 'Elegir →');
+    };
+  }
   document.getElementById('btn-agregar-ejercicio').onclick = () => agregarBloqueEjercicio();
   document.getElementById('input-nuevo-ejercicio').onkeydown = (e) => { if(e.key === 'Enter'){ e.preventDefault(); agregarBloqueEjercicio(); } };
   document.getElementById('btn-finalizar-sesion').onclick = finalizarSesion;
