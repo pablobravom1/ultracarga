@@ -796,7 +796,12 @@ async function renderHistorialRutinas(alumno, volverFn, permitirDuplicar){
     <div class="card">
       <div class="row-flex" style="margin-bottom:${permitirDuplicar ? '6px' : '0'};">
         <h2 style="margin:0;">${escapeHtml(r.nombre)}</h2>
-        ${permitirDuplicar ? `<button class="btn-sm" data-dup-id="${r.id}">Usar como base</button>` : ''}
+        ${permitirDuplicar ? `
+          <div style="display:flex; gap:6px;">
+            <button class="btn-sm" data-dup-id="${r.id}">Usar como base</button>
+            <button class="btn-sm" data-del-id="${r.id}">Eliminar</button>
+          </div>
+        ` : ''}
       </div>
       ${r.objetivo ? `<div class="sub" style="margin-bottom:6px;">${escapeHtml(r.objetivo)}</div>` : ''}
       <div class="sub" style="margin-bottom:10px;">Creada el ${formatDateShort(String(r.created_at).slice(0,10))}</div>
@@ -817,7 +822,31 @@ async function renderHistorialRutinas(alumno, volverFn, permitirDuplicar){
         duplicarRutinaComoNueva(alumno, rutina);
       };
     });
+    listEl.querySelectorAll('[data-del-id]').forEach(btn => {
+      btn.onclick = () => {
+        if(btn.dataset.confirm === '1'){
+          eliminarRutina(btn.dataset.delId, () => renderHistorialRutinas(alumno, volverFn, permitirDuplicar));
+        } else {
+          btn.dataset.confirm = '1';
+          btn.textContent = '¿Seguro?';
+          btn.classList.add('btn-danger-confirm');
+          setTimeout(() => {
+            if(!btn.isConnected) return;
+            btn.dataset.confirm = '';
+            btn.textContent = 'Eliminar';
+            btn.classList.remove('btn-danger-confirm');
+          }, 3000);
+        }
+      };
+    });
   }
+}
+
+async function eliminarRutina(id, onDeleted){
+  const { error } = await sb.from('rutinas').delete().eq('id', id);
+  if(error){ showToast('No se pudo eliminar la rutina'); return; }
+  showToast('Rutina eliminada');
+  if(onDeleted) onDeleted();
 }
 
 function duplicarRutinaComoNueva(alumno, rutinaVieja){
@@ -912,6 +941,7 @@ async function renderCoachAlumnoDetail(alumnoId){
         `).join('')}
       `).join('')}
       ${historial && historial.length ? `<button class="link-btn" id="btn-ver-historial-rutinas" style="margin-top:12px;">Ver rutinas anteriores (${historial.length}) →</button>` : ''}
+      ${rutina ? `<button class="btn-sm btn-eliminar-sesion" id="btn-eliminar-rutina" style="margin-top:12px;">Eliminar rutina</button>` : ''}
     </div>
 
     <h2>Historial de sesiones</h2>
@@ -921,6 +951,24 @@ async function renderCoachAlumnoDetail(alumnoId){
   document.getElementById('btn-nueva-rutina').onclick = () => renderRutinaEditor(alumno);
   if(historial && historial.length){
     document.getElementById('btn-ver-historial-rutinas').onclick = () => renderHistorialRutinas(alumno, () => renderCoachAlumnoDetail(alumnoId), true);
+  }
+  if(rutina){
+    const btnDelRutina = document.getElementById('btn-eliminar-rutina');
+    btnDelRutina.onclick = () => {
+      if(btnDelRutina.dataset.confirm === '1'){
+        eliminarRutina(rutina.id, () => renderCoachAlumnoDetail(alumnoId));
+      } else {
+        btnDelRutina.dataset.confirm = '1';
+        btnDelRutina.textContent = '¿Seguro? Toca de nuevo para eliminar';
+        btnDelRutina.classList.add('btn-danger-confirm');
+        setTimeout(() => {
+          if(!btnDelRutina.isConnected) return;
+          btnDelRutina.dataset.confirm = '';
+          btnDelRutina.textContent = 'Eliminar rutina';
+          btnDelRutina.classList.remove('btn-danger-confirm');
+        }, 3000);
+      }
+    };
   }
   renderSesionesList('sesiones-list', conSeries, true, () => renderCoachAlumnoDetail(alumnoId));
 }
