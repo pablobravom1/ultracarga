@@ -860,9 +860,23 @@ async function seleccionarDiaSesion(nombre){
   renderNuevaSesionForm();
 }
 
-function renderSetLine(s, i){
+function renderSetLine(s, i, idx){
   const nota = s.nota ? `<span class="pill" style="padding:2px 8px; font-size:10.5px;">${escapeHtml(s.nota)}</span>` : '';
-  return `<div class="set-line">S${i+1}: <b>${s.reps}</b> × <b>${s.peso}kg</b>${nota ? ` ${nota}` : ''}</div>`;
+  const btnBorrar = (idx != null && s.id) ? `<button type="button" class="remove-x" style="height:22px; width:22px; font-size:10px; flex-shrink:0;" onclick="eliminarSetIndividual(${idx}, '${s.id}')" title="Quitar esta serie">✕</button>` : '';
+  return `<div class="set-line"><span>S${i+1}: <b>${s.reps}</b> × <b>${s.peso}kg</b>${nota ? ` ${nota}` : ''}</span>${btnBorrar}</div>`;
+}
+
+async function eliminarSetIndividual(idx, setId){
+  const grupo = activeSesionExs[idx];
+  if(!grupo) return;
+  const { error } = await sb.from('sesion_series').delete().eq('id', setId);
+  if(error){ showToast('No se pudo quitar la serie'); return; }
+  grupo.sets = grupo.sets.filter(s => s.id !== setId);
+  const setsHolder = document.getElementById(`bloque-sets-${idx}`);
+  if(setsHolder){
+    setsHolder.innerHTML = grupo.sets.map((s, i) => renderSetLine(s, i, idx)).join('');
+  }
+  showToast('Serie quitada');
 }
 
 async function agregarSetABloque(idx){
@@ -894,7 +908,7 @@ async function agregarSetABloque(idx){
   grupo.sets.push(data);
   const setsHolder = document.getElementById(`bloque-sets-${idx}`);
   if(setsHolder){
-    setsHolder.innerHTML = grupo.sets.map(renderSetLine).join('');
+    setsHolder.innerHTML = grupo.sets.map((s, i) => renderSetLine(s, i, idx)).join('');
   }
   if(pesoEl) pesoEl.value = '';
   if(repsEl){ repsEl.value = ''; repsEl.focus(); }
@@ -940,7 +954,7 @@ function renderDraftExercises(){
         <button type="button" class="remove-x" style="height:28px; width:28px; font-size:12px;" onclick="quitarBloqueEjercicio(${idx}, this)" title="Quitar ejercicio">✕</button>
       </div>
       <div id="bloque-sets-${idx}">
-        ${ex.sets.map(renderSetLine).join('')}
+        ${ex.sets.map((s, i) => renderSetLine(s, i, idx)).join('')}
       </div>
       <div class="set-input-row" style="margin-top:8px;">
         <div><input type="number" id="input-reps-${idx}" placeholder="Reps" style="margin-bottom:0;"></div>
