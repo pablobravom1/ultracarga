@@ -454,6 +454,52 @@ function irASesion(fecha){
   setTimeout(()=> el.classList.remove('highlight'), 1600);
 }
 
+// Línea de una serie ya guardada, dentro del historial de sesiones.
+// El coach la ve de solo lectura; el alumno puede agregar/editar la nota
+// de esa serie después de haberla guardado (antes solo se podía al toque).
+function renderSetLineHistorial(set, i, isCoachView){
+  const pr = set._isPR ? '<span class="pill pr">🏆 PR</span>' : '';
+  if(isCoachView){
+    const nota = set.nota ? `<span class="pill" style="padding:2px 8px; font-size:10.5px;">${escapeHtml(set.nota)}</span>` : '';
+    return `<div class="set-line">S${i+1}: <b>${set.reps}</b> reps × <b>${set.peso}kg</b> ${nota} ${pr}</div>`;
+  }
+  return `<div class="set-line">
+    <span>S${i+1}: <b>${set.reps}</b> reps × <b>${set.peso}kg</b> ${pr}</span>
+    <span id="nota-serie-${set.id}" style="display:inline-flex; align-items:center; gap:6px;">
+      ${set.nota ? `<span class="pill" style="padding:2px 8px; font-size:10.5px;">${escapeHtml(set.nota)}</span>` : ''}
+      <button type="button" class="link-btn" onclick="mostrarEditorNotaSerie('${set.id}')">${set.nota ? 'Editar' : '+ nota'}</button>
+    </span>
+  </div>`;
+}
+
+function mostrarEditorNotaSerie(setId){
+  const holder = document.getElementById(`nota-serie-${setId}`);
+  if(!holder) return;
+  const pillActual = holder.querySelector('.pill');
+  const valorActual = pillActual ? pillActual.textContent : '';
+  holder.innerHTML = `
+    <input type="text" id="input-editar-nota-${setId}" value="${escapeHtml(valorActual)}" placeholder="Nota de esta serie" style="display:inline-block; width:150px; margin:0; padding:4px 8px; font-size:11.5px;">
+    <button type="button" class="link-btn" onclick="guardarNotaSerie('${setId}')">Guardar</button>
+  `;
+  const input = document.getElementById(`input-editar-nota-${setId}`);
+  if(input){ input.focus(); input.select(); }
+}
+
+async function guardarNotaSerie(setId){
+  const input = document.getElementById(`input-editar-nota-${setId}`);
+  const val = input ? input.value.trim() : '';
+  const { error } = await sb.from('sesion_series').update({ nota: val || null }).eq('id', setId);
+  if(error){ showToast('No se pudo guardar la nota, intenta de nuevo'); return; }
+  const holder = document.getElementById(`nota-serie-${setId}`);
+  if(holder){
+    holder.innerHTML = `
+      ${val ? `<span class="pill" style="padding:2px 8px; font-size:10.5px;">${escapeHtml(val)}</span>` : ''}
+      <button type="button" class="link-btn" onclick="mostrarEditorNotaSerie('${setId}')">${val ? 'Editar' : '+ nota'}</button>
+    `;
+  }
+  showToast('Nota guardada ✓');
+}
+
 function renderSesionesList(holderId, sesiones, isCoachView, onDeleted){
   const holder = document.getElementById(holderId);
   if(!sesiones.length){
@@ -476,7 +522,7 @@ function renderSesionesList(holderId, sesiones, isCoachView, onDeleted){
         ${groups.map(g => `
           <div class="exercise-group">
             <div class="ex-head"><span class="ex-name">${escapeHtml(g.nombre)}</span></div>
-            ${g.sets.map((set,i) => `<div class="set-line">S${i+1}: <b>${set.reps}</b> reps × <b>${set.peso}kg</b> ${set.nota ? `<span class="pill" style="padding:2px 8px; font-size:10.5px;">${escapeHtml(set.nota)}</span>` : ''} ${set._isPR ? '<span class="pill pr">🏆 PR</span>' : ''}</div>`).join('')}
+            ${g.sets.map((set,i) => renderSetLineHistorial(set, i, isCoachView)).join('')}
           </div>
         `).join('')}
         ${isCoachView
