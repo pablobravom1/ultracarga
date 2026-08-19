@@ -479,7 +479,14 @@ function renderSesionesList(holderId, sesiones, isCoachView, onDeleted){
             ${g.sets.map((set,i) => `<div class="set-line">S${i+1}: <b>${set.reps}</b> reps × <b>${set.peso}kg</b> ${set.nota ? `<span class="pill" style="padding:2px 8px; font-size:10.5px;">${escapeHtml(set.nota)}</span>` : ''} ${set._isPR ? '<span class="pill pr">🏆 PR</span>' : ''}</div>`).join('')}
           </div>
         `).join('')}
-        ${s.nota_alumno ? `<div class="note-box"><div class="note-label">Nota del alumno</div>${escapeHtml(s.nota_alumno)}</div>` : ''}
+        ${isCoachView
+          ? (s.nota_alumno ? `<div class="note-box"><div class="note-label">Nota del alumno</div>${escapeHtml(s.nota_alumno)}</div>` : '')
+          : `<div class="note-box" style="margin-top:12px;">
+              <div class="note-label">Tu nota</div>
+              <textarea id="nota-alumno-${s.id}" placeholder="¿Cómo te sentiste en este entrenamiento?">${escapeHtml(s.nota_alumno || '')}</textarea>
+              <button class="btn-sm" onclick="guardarNotaAlumno('${s.id}')">Guardar nota</button>
+            </div>`
+        }
         ${s.foto_url ? `<img class="session-photo" src="${s.foto_url}" alt="Foto de la sesión">` : ''}
         ${isCoachView ? `
           <div class="note-box" style="margin-top:12px;">
@@ -986,6 +993,17 @@ async function finalizarSesion(){
   const fotoInput = document.getElementById('input-foto');
   let foto_url = null;
 
+  // Si algo falla acá abajo, NO borramos activeSesionId ni el formulario:
+  // dejamos todo tal cual (con la nota que escribió) para que pueda tocar
+  // "Finalizar" de nuevo sin perder lo que escribió. Sus series ya están
+  // guardadas de antes (autoguardado), así que lo único en juego acá es
+  // la nota y la foto.
+  function reintentar(mensaje){
+    showToast(mensaje);
+    btn.disabled = false;
+    btn.textContent = `${ICONS.check} Finalizar entrenamiento de hoy`;
+  }
+
   try{
     if(fotoInput.files[0]){
       const file = fotoInput.files[0];
@@ -996,10 +1014,15 @@ async function finalizarSesion(){
         foto_url = sb.storage.from('sesion-fotos').getPublicUrl(path).data.publicUrl;
       }
     }
-    await sb.from('sesiones').update({ nota_alumno: nota || null, foto_url }).eq('id', activeSesionId);
+    const { error } = await sb.from('sesiones').update({ nota_alumno: nota || null, foto_url }).eq('id', activeSesionId);
+    if(error){
+      reintentar('Tus series ya están guardadas, pero no se pudo guardar la nota — toca "Finalizar" de nuevo para reintentar.');
+      return;
+    }
     showToast('¡Sesión guardada!');
   }catch(e){
-    showToast('Hubo un problema guardando algunos detalles, pero tus series ya quedaron guardadas.');
+    reintentar('Tus series ya están guardadas, pero no se pudo guardar la nota — toca "Finalizar" de nuevo para reintentar.');
+    return;
   }
 
   activeSesionId = null; activeSesionExs = []; activeSesionDia = null;
@@ -1484,6 +1507,13 @@ async function eliminarAlumno(alumnoId, nombre, btn){
 async function guardarNotaCoach(sesionId){
   const val = document.getElementById(`nota-coach-${sesionId}`).value.trim();
   const { error } = await sb.from('sesiones').update({ nota_coach: val || null }).eq('id', sesionId);
+  if(error){ showToast('No se pudo guardar la nota'); return; }
+  showToast('Nota guardada ✓');
+}
+
+async function guardarNotaAlumno(sesionId){
+  const val = document.getElementById(`nota-alumno-${sesionId}`).value.trim();
+  const { error } = await sb.from('sesiones').update({ nota_alumno: val || null }).eq('id', sesionId);
   if(error){ showToast('No se pudo guardar la nota'); return; }
   showToast('Nota guardada ✓');
 }
