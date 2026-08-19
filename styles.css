@@ -159,3 +159,9 @@ input:focus, select:focus, textarea:focus{outline:none; border-color:var(--blue)
 .dia-btn.selected{background:var(--blue); color:var(--ink); border-color:var(--blue); font-weight:700;}
 .dia-heading{font-family:'Oswald'; font-size:12px; letter-spacing:0.05em; color:var(--chalk-dim); text-transform:uppercase; margin:14px 0 6px; border-top:1px solid var(--line); padding-top:10px;}
 .dia-heading:first-of-type{margin-top:0; border-top:none; padding-top:0;}
+
+.ios-install-banner{position:relative; border-color:var(--blue); font-size:13px; line-height:1.5; color:var(--chalk-dim); padding-right:40px;}
+.ios-install-row{display:flex; align-items:flex-start; gap:12px;}
+.ios-install-icon{flex-shrink:0; width:32px; height:32px; border-radius:6px; background:var(--surface-2); display:flex; align-items:center; justify-content:center; color:var(--blue);}
+.ios-install-title{font-family:'Oswald'; font-size:13.5px; letter-spacing:0.02em; color:var(--chalk); margin-bottom:4px;}
+.ios-install-close{position:absolute; top:12px; right:12px; background:none; border:none; color:var(--chalk-dim); font-size:14px; cursor:pointer; padding:4px;}

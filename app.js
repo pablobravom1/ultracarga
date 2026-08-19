@@ -34,7 +34,8 @@ const ICONS = {
   camera: `<svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>`,
   users: `<svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>`,
   link: `<svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>`,
-  message: `<svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>`
+  message: `<svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>`,
+  share: `<svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"></path><polyline points="16 6 12 2 8 6"></polyline><line x1="12" y1="2" x2="12" y2="15"></line></svg>`
 };
 // Markup del lado derecho de un botón-toggle: texto según estado + flecha que rota.
 function toggleStateHtml(closedTxt){
@@ -1635,9 +1636,54 @@ async function guardarRutina(alumno){
   renderCoachAlumnoDetail(alumno.id);
 }
 
+// ---------- INSTALAR EN IPHONE (banner PWA para Safari) ----------
+function esIOSSafariSinInstalar(){
+  if(window.navigator.standalone === true) return false; // ya instalada
+  if(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) return false;
+  const ua = window.navigator.userAgent || '';
+  const esIOS = /iPad|iPhone|iPod/.test(ua) || (ua.includes('Macintosh') && 'ontouchend' in document);
+  if(!esIOS) return false;
+  const esOtroNavegador = /CriOS|FxiOS|EdgiOS|OPiOS/.test(ua);
+  if(esOtroNavegador) return false;
+  return true;
+}
+
+function initIOSInstallBanner(){
+  try{
+    if(!esIOSSafariSinInstalar()) return;
+    if(localStorage.getItem('ios_install_banner_cerrado') === '1') return;
+
+    const wrap = document.querySelector('.wrap');
+    const appRoot = document.getElementById('app-root');
+    if(!wrap || !appRoot) return;
+
+    const banner = document.createElement('div');
+    banner.className = 'card ios-install-banner';
+    banner.innerHTML = `
+      <button type="button" class="ios-install-close" title="Cerrar">✕</button>
+      <div class="ios-install-row">
+        <div class="ios-install-icon">${ICONS.share}</div>
+        <div>
+          <div class="ios-install-title">Instalá UltraCarga en tu iPhone</div>
+          <div>Tocá <b>Compartir</b> abajo en Safari y elegí <b>"Añadir a pantalla de inicio"</b>. Así la abrís como una app, sin el navegador.</div>
+        </div>
+      </div>
+    `;
+    wrap.insertBefore(banner, appRoot);
+
+    banner.querySelector('.ios-install-close').onclick = () => {
+      localStorage.setItem('ios_install_banner_cerrado', '1');
+      banner.remove();
+    };
+  } catch(e){
+    // si algo falla acá, que no rompa el resto de la app
+  }
+}
+
 // ---------- ARRANCA LA APP ----------
 const _splashStart = Date.now();
 boot().finally(() => {
   const wait = Math.max(0, 500 - (Date.now() - _splashStart));
   setTimeout(hideSplash, wait);
 });
+initIOSInstallBanner();
