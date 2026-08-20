@@ -36,7 +36,8 @@ const ICONS = {
   users: `<svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>`,
   link: `<svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>`,
   message: `<svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>`,
-  share: `<svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"></path><polyline points="16 6 12 2 8 6"></polyline><line x1="12" y1="2" x2="12" y2="15"></line></svg>`
+  share: `<svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"></path><polyline points="16 6 12 2 8 6"></polyline><line x1="12" y1="2" x2="12" y2="15"></line></svg>`,
+  search: `<svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>`
 };
 // Markup del lado derecho de un botón-toggle: texto según estado + flecha que rota.
 function toggleStateHtml(closedTxt){
@@ -1263,6 +1264,11 @@ function duplicarRutinaComoNueva(alumno, rutinaVieja){
 // ============================================================
 // VISTA COACH
 // ============================================================
+// Quita tildes y pasa a minúsculas, para que buscar "jose" encuentre "José".
+function normalizarTexto(txt){
+  return (txt || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
 async function renderCoachHome(){
   root().innerHTML = `<div class="loading">Cargando alumnos...</div>`;
   const esSuperAdmin = profile.role === 'super_admin';
@@ -1308,6 +1314,12 @@ async function renderCoachHome(){
       </button>
       <div class="hidden" id="buzon-holder"></div>
     ` : ''}
+    ${esSuperAdmin && conUltima.length ? `
+      <div style="position:relative; margin-bottom:14px;">
+        <span style="position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--chalk-dim); display:flex;">${ICONS.search}</span>
+        <input type="text" id="input-buscar-alumno" placeholder="Buscar alumno por nombre..." style="padding-left:36px; margin-bottom:0;" autocomplete="off">
+      </div>
+    ` : ''}
     <div id="coach-alumnos-list"></div>
   `;
   document.getElementById('btn-logout').onclick = handleLogout;
@@ -1317,14 +1329,31 @@ async function renderCoachHome(){
       renderGestionProfesores('profesores-holder', profesores, conUltima, renderCoachHome);
     });
     wireToggle('btn-toggle-buzon', 'buzon-holder', () => renderBuzonOpiniones('buzon-holder'));
+
+    const inputBuscar = document.getElementById('input-buscar-alumno');
+    if(inputBuscar){
+      inputBuscar.oninput = () => {
+        const q = normalizarTexto(inputBuscar.value.trim());
+        const filtrados = q ? conUltima.filter(a => normalizarTexto(a.nombre).includes(q)) : conUltima;
+        renderListaAlumnos(filtrados, esSuperAdmin, profesores, nombreProfesor, conUltima.length, q);
+      };
+    }
   }
 
+  renderListaAlumnos(conUltima, esSuperAdmin, profesores, nombreProfesor, conUltima.length, '');
+}
+
+function renderListaAlumnos(lista, esSuperAdmin, profesores, nombreProfesor, totalSinFiltrar, query){
   const listEl = document.getElementById('coach-alumnos-list');
-  if(!conUltima.length){
+  if(!totalSinFiltrar){
     listEl.innerHTML = `<div class="empty">Aún no hay alumnos registrados.<br>Cuando alguien cree su cuenta, va a aparecer aquí.</div>`;
     return;
   }
-  listEl.innerHTML = conUltima.map(a => `
+  if(!lista.length){
+    listEl.innerHTML = `<div class="empty">No hay ningún alumno que coincida con "${escapeHtml(query)}".</div>`;
+    return;
+  }
+  listEl.innerHTML = lista.map(a => `
     <div class="coach-list-item">
       <div style="flex:1; min-width:0; cursor:pointer;" onclick="renderCoachAlumnoDetail('${a.id}')">
         <div class="coach-name">${escapeHtml(a.nombre)}</div>
