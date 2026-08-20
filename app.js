@@ -538,7 +538,7 @@ async function guardarSerieHistorial(setId){
   showToast('Serie actualizada ✓');
 }
 
-function renderSesionesList(holderId, sesiones, isCoachView, onDeleted){
+function renderSesionesList(holderId, sesiones, isCoachView, onDeleted, soloLectura){
   const holder = document.getElementById(holderId);
   if(!sesiones.length){
     holder.innerHTML = `<div class="empty">Aún no hay entrenamientos registrados.</div>`;
@@ -572,14 +572,14 @@ function renderSesionesList(holderId, sesiones, isCoachView, onDeleted){
             </div>`
         }
         ${s.foto_url ? `<img class="session-photo" src="${s.foto_url}" alt="Foto de la sesión">` : ''}
-        ${isCoachView ? `
+        ${isCoachView && !soloLectura ? `
           <div class="note-box" style="margin-top:12px;">
             <div class="note-label">Nota del coach</div>
             <textarea id="nota-coach-${s.id}" placeholder="Escribe una observación para esta sesión...">${escapeHtml(s.nota_coach || '')}</textarea>
             <button class="btn-sm" onclick="guardarNotaCoach('${s.id}')">Guardar nota</button>
           </div>
         ` : (s.nota_coach ? `<div class="note-box"><div class="note-label">Nota del coach</div>${escapeHtml(s.nota_coach)}</div>` : '')}
-        <button class="btn-sm btn-eliminar-sesion" data-id="${s.id}" style="margin-top:12px;">Eliminar sesión</button>
+        ${soloLectura ? '' : `<button class="btn-sm btn-eliminar-sesion" data-id="${s.id}" style="margin-top:12px;">Eliminar sesión</button>`}
       </div>
     </div>
   `;
@@ -612,7 +612,7 @@ async function eliminarSesion(id, onDeleted){
 }
 
 // ---------- MEDICIONES CORPORALES (foto del resumen de InBody, con historial) ----------
-async function renderMediciones(holderId, alumnoId){
+async function renderMediciones(holderId, alumnoId, soloLectura){
   const holder = document.getElementById(holderId);
   holder.innerHTML = `<div class="loading">Cargando mediciones...</div>`;
 
@@ -624,13 +624,13 @@ async function renderMediciones(holderId, alumnoId){
         <div class="session-head"><span>${formatDate(m.fecha)}</span></div>
         <div class="session-body">
           <img class="session-photo" src="${m.foto_url}" alt="Medición InBody">
-          <button class="btn-sm btn-eliminar-sesion" data-id="${m.id}" style="margin-top:12px;">Eliminar medición</button>
+          ${soloLectura ? '' : `<button class="btn-sm btn-eliminar-sesion" data-id="${m.id}" style="margin-top:12px;">Eliminar medición</button>`}
         </div>
       </div>
     `).join('')
     : `<div class="empty">Aún no hay mediciones registradas.</div>`;
 
-  holder.innerHTML = `
+  holder.innerHTML = soloLectura ? listaHtml : `
     <div class="card" style="margin-bottom:16px;">
       <label>Fecha de la medición</label>
       <input type="date" id="input-fecha-medicion" value="${todayStr()}" max="${todayStr()}">
@@ -642,6 +642,8 @@ async function renderMediciones(holderId, alumnoId){
     </div>
     ${listaHtml}
   `;
+
+  if(soloLectura) return;
 
   document.getElementById('input-foto-medicion').onchange = (e) => {
     const f = e.target.files[0];
@@ -700,8 +702,19 @@ async function eliminarMedicion(id, alumnoId, holderId){
 }
 
 // ---------- ENTREVISTA INICIAL (audio, solo profe/super admin — no aparece en la vista del alumno) ----------
-async function renderEntrevista(holderId, alumnoId, audioUrl, fecha){
+async function renderEntrevista(holderId, alumnoId, audioUrl, fecha, soloLectura){
   const holder = document.getElementById(holderId);
+
+  if(soloLectura){
+    holder.innerHTML = audioUrl ? `
+      <div class="card">
+        <div class="sub" style="margin-bottom:8px;">${fecha ? 'Grabada el ' + formatDateShort(fecha) : 'Fecha no registrada'}</div>
+        <audio controls style="width:100%;" src="${audioUrl}"></audio>
+      </div>
+    ` : `<div class="empty">Todavía no se registró la entrevista inicial.</div>`;
+    return;
+  }
+
   holder.innerHTML = audioUrl ? `
     <div class="card">
       <div class="sub" style="margin-bottom:8px;">${fecha ? 'Grabada el ' + formatDateShort(fecha) : 'Fecha no registrada'}</div>
@@ -1376,7 +1389,7 @@ async function renderCoachHome(){
 
   const [{ data: alumnos, error }, profesoresRes] = await Promise.all([
     sb.from('profiles').select('*').eq('role', 'alumno').order('nombre'),
-    esSuperAdmin ? sb.from('profiles').select('*').eq('role', 'profesor').order('nombre') : Promise.resolve({ data: [] })
+    sb.from('profiles').select('*').eq('role', 'profesor').order('nombre')
   ]);
   if(error){ root().innerHTML = `<div class="error-banner">No se pudo cargar la lista de alumnos.</div>`; return; }
   const profesores = profesoresRes.data || [];
@@ -1438,6 +1451,15 @@ async function renderCoachHome(){
         <div id="coach-alumnos-list"></div>
       </div>
     ` : `
+      ${conUltima.length ? `
+        <div style="position:relative; margin-bottom:14px;">
+          <span style="position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--chalk-dim); display:flex;">${ICONS.search}</span>
+          <input type="text" id="input-buscar-alumno" placeholder="Buscar alumno por nombre..." style="padding-left:36px; margin-bottom:0;" autocomplete="off">
+        </div>
+      ` : ''}
+      <div class="card" style="font-size:12.5px; color:var(--chalk-dim); margin-bottom:14px;">
+        Puedes ver el perfil de cualquier alumno, aunque no sea tuyo, por si necesitas cubrir a otro profe — pero solo puedes editar o eliminar cosas en los alumnos asignados a ti.
+      </div>
       <div id="coach-alumnos-list"></div>
     `}
   `;
@@ -1449,15 +1471,15 @@ async function renderCoachHome(){
     });
     wireToggle('btn-toggle-buzon', 'buzon-holder', () => renderBuzonOpiniones('buzon-holder'));
     wireToggle('btn-toggle-alumnos', 'alumnos-holder');
+  }
 
-    const inputBuscar = document.getElementById('input-buscar-alumno');
-    if(inputBuscar){
-      inputBuscar.oninput = () => {
-        const q = normalizarTexto(inputBuscar.value.trim());
-        const filtrados = q ? conUltima.filter(a => normalizarTexto(a.nombre).includes(q)) : conUltima;
-        renderListaAlumnos(filtrados, esSuperAdmin, profesores, nombreProfesor, conUltima.length, q);
-      };
-    }
+  const inputBuscar = document.getElementById('input-buscar-alumno');
+  if(inputBuscar){
+    inputBuscar.oninput = () => {
+      const q = normalizarTexto(inputBuscar.value.trim());
+      const filtrados = q ? conUltima.filter(a => normalizarTexto(a.nombre).includes(q)) : conUltima;
+      renderListaAlumnos(filtrados, esSuperAdmin, profesores, nombreProfesor, conUltima.length, q);
+    };
   }
 
   renderListaAlumnos(conUltima, esSuperAdmin, profesores, nombreProfesor, conUltima.length, '');
@@ -1477,7 +1499,7 @@ function renderListaAlumnos(lista, esSuperAdmin, profesores, nombreProfesor, tot
     <div class="coach-list-item">
       <div style="flex:1; min-width:0; cursor:pointer;" onclick="renderCoachAlumnoDetail('${a.id}')">
         <div class="coach-name">${escapeHtml(a.nombre)}</div>
-        <div class="coach-meta">${a.ultima ? 'Última sesión: ' + formatDateShort(a.ultima) : 'Sin sesiones todavía'}${esSuperAdmin ? ' · ' + (nombreProfesor(a.profesor_id) ? escapeHtml(nombreProfesor(a.profesor_id)) : 'Sin profesor asignado') : ''}</div>
+        <div class="coach-meta">${a.ultima ? 'Última sesión: ' + formatDateShort(a.ultima) : 'Sin sesiones todavía'} · ${nombreProfesor(a.profesor_id) ? escapeHtml(nombreProfesor(a.profesor_id)) : 'Sin profesor asignado'}</div>
         <div class="coach-meta" style="margin-top:2px;">${renderEstadoVencimiento('Rutina', a.rutinaFecha, 30, 'sin rutina activa')} · ${renderEstadoVencimiento('Medición', a.medicionFecha, 60, 'sin mediciones')}</div>
       </div>
       ${esSuperAdmin ? `
@@ -1672,6 +1694,9 @@ async function renderCoachAlumnoDetail(alumnoId){
   const diasRutina = (rutina && rutina.rutina_ejercicios) ? groupPorDia(rutina.rutina_ejercicios) : [];
   const medicionFecha = medicionesUltima && medicionesUltima[0] ? medicionesUltima[0].fecha : null;
   const rutinaVencida = rutina ? estaVencida(rutina.fecha, 30) : false;
+  // Modo observador: un profesor que no es el asignado a este alumno puede entrar a mirar
+  // (por ejemplo si el profe titular faltó), pero no puede crear, editar ni eliminar nada.
+  const soloObservador = profile.role === 'profesor' && alumno.profesor_id !== profile.id;
 
   root().innerHTML = `
     <div class="header-actions">
@@ -1681,6 +1706,12 @@ async function renderCoachAlumnoDetail(alumnoId){
       </div>
       <button class="switch-user" id="btn-volver">${ICONS.arrowLeft} Volver</button>
     </div>
+
+    ${soloObservador ? `
+      <div class="card" style="font-size:12.5px; border-color:var(--orange); color:var(--chalk);">
+        ${ICONS.activity} Estás viendo este alumno en modo observador (no está asignado a ti) — puedes ver todo, pero no editar ni eliminar nada.
+      </div>
+    ` : ''}
 
     <div class="card" style="font-size:12.5px;">
       <div>${renderEstadoVencimiento('Última rutina', rutina ? rutina.fecha : null, 30, 'sin rutina activa')}</div>
@@ -1696,7 +1727,7 @@ async function renderCoachAlumnoDetail(alumnoId){
       <div class="card">
         <div class="row-flex" style="margin-bottom:0;">
           <h2 style="margin:0;">Sin rutina activa</h2>
-          <button class="btn-sm" id="btn-nueva-rutina">+ Crear rutina</button>
+          ${soloObservador ? '' : '<button class="btn-sm" id="btn-nueva-rutina">+ Crear rutina</button>'}
         </div>
       </div>
     `}
@@ -1705,10 +1736,12 @@ async function renderCoachAlumnoDetail(alumnoId){
       <div class="card hidden" id="rutina-detail-card">
         <div class="row-flex" style="margin-bottom:6px;">
           <h2 style="margin:0; ${rutinaVencida ? 'color:var(--red);' : ''}">${escapeHtml(rutina.nombre)}${rutinaVencida ? ' (vencida)' : ''}</h2>
-          <div style="display:flex; gap:6px;">
-            <button class="btn-sm" id="btn-editar-rutina">Editar</button>
-            <button class="btn-sm" id="btn-nueva-rutina">Crear nueva rutina</button>
-          </div>
+          ${soloObservador ? '' : `
+            <div style="display:flex; gap:6px;">
+              <button class="btn-sm" id="btn-editar-rutina">Editar</button>
+              <button class="btn-sm" id="btn-nueva-rutina">Crear nueva rutina</button>
+            </div>
+          `}
         </div>
         ${rutina.objetivo ? `<div class="sub" style="margin-bottom:8px;">${escapeHtml(rutina.objetivo)}</div>` : ''}
         ${diasRutina.map(d => `
@@ -1717,7 +1750,7 @@ async function renderCoachAlumnoDetail(alumnoId){
             <div class="set-line"><span>${escapeHtml(ex.nombre)}</span>${renderExMeta(ex)}</div>${renderExNota(ex)}
           `).join('')}
         `).join('')}
-        <button class="btn-sm btn-eliminar-sesion" id="btn-eliminar-rutina" style="margin-top:12px;">Eliminar rutina</button>
+        ${soloObservador ? '' : '<button class="btn-sm btn-eliminar-sesion" id="btn-eliminar-rutina" style="margin-top:12px;">Eliminar rutina</button>'}
       </div>
     ` : ''}
 
@@ -1750,26 +1783,27 @@ async function renderCoachAlumnoDetail(alumnoId){
     ` : ''}
   `;
   document.getElementById('btn-volver').onclick = renderCoachHome;
-  document.getElementById('btn-nueva-rutina').onclick = () => renderRutinaEditor(alumno);
+  const btnNuevaRutina = document.getElementById('btn-nueva-rutina');
+  if(btnNuevaRutina) btnNuevaRutina.onclick = () => renderRutinaEditor(alumno);
   if(rutina){
     wireToggle('btn-toggle-rutina', 'rutina-detail-card');
   }
   {
     let medicionesInicializado = false;
     wireToggle('btn-toggle-mediciones', 'mediciones-holder', () => {
-      if(!medicionesInicializado){ renderMediciones('mediciones-holder', alumnoId); medicionesInicializado = true; }
+      if(!medicionesInicializado){ renderMediciones('mediciones-holder', alumnoId, soloObservador); medicionesInicializado = true; }
     });
   }
   {
     let entrevistaInicializada = false;
     wireToggle('btn-toggle-entrevista', 'entrevista-holder', () => {
-      if(!entrevistaInicializada){ renderEntrevista('entrevista-holder', alumnoId, alumno.entrevista_audio_url, alumno.entrevista_fecha); entrevistaInicializada = true; }
+      if(!entrevistaInicializada){ renderEntrevista('entrevista-holder', alumnoId, alumno.entrevista_audio_url, alumno.entrevista_fecha, soloObservador); entrevistaInicializada = true; }
     });
   }
   wireToggle('btn-toggle-calendario', 'calendar-holder');
   wireToggle('btn-toggle-historial', 'sesiones-list');
   renderCalendar('calendar-holder', fechas);
-  if(rutina){
+  if(rutina && !soloObservador){
     document.getElementById('btn-editar-rutina').onclick = () => {
       const dias = diasRutina.map(d => ({
         nombre: d.nombre,
@@ -1786,9 +1820,9 @@ async function renderCoachAlumnoDetail(alumnoId){
     };
   }
   if(historial && historial.length){
-    document.getElementById('btn-ver-historial-rutinas').onclick = () => renderHistorialRutinas(alumno, () => renderCoachAlumnoDetail(alumnoId), true);
+    document.getElementById('btn-ver-historial-rutinas').onclick = () => renderHistorialRutinas(alumno, () => renderCoachAlumnoDetail(alumnoId), !soloObservador);
   }
-  if(rutina){
+  if(rutina && !soloObservador){
     const btnDelRutina = document.getElementById('btn-eliminar-rutina');
     btnDelRutina.onclick = () => {
       if(btnDelRutina.dataset.confirm === '1'){
@@ -1806,7 +1840,7 @@ async function renderCoachAlumnoDetail(alumnoId){
       }
     };
   }
-  renderSesionesList('sesiones-list', conSeries, true, () => renderCoachAlumnoDetail(alumnoId));
+  renderSesionesList('sesiones-list', conSeries, true, () => renderCoachAlumnoDetail(alumnoId), soloObservador);
 
   if(profile.role === 'super_admin'){
     const btnElimAlumno = document.getElementById('btn-eliminar-alumno');
