@@ -1515,7 +1515,10 @@ function renderGestionProfesores(holderId, profesores, alumnos, onCambio){
 
   holder.innerHTML = `
     <div class="card" style="margin-bottom:16px;">
-      <label style="margin-bottom:8px; display:block;">Profesores</label>
+      <div class="row-flex" style="margin-bottom:8px;">
+        <label style="margin:0;">Profesores</label>
+        <button class="btn-sm" id="btn-pdf-protocolos">${ICONS.download} PDF: alumnos por profesor</button>
+      </div>
       ${profesores.length ? profesores.map(p => `
         <div class="coach-list-item" style="cursor:default; align-items:flex-start; margin-bottom:4px;">
           <div style="flex:1; min-width:0;">
@@ -1553,6 +1556,8 @@ function renderGestionProfesores(holderId, profesores, alumnos, onCambio){
     };
   });
 
+  document.getElementById('btn-pdf-protocolos').onclick = () => descargarPDFEstadoProtocolos(profesores, alumnos);
+
   profesores.forEach(p => {
     const suyos = (alumnos||[]).filter(a => a.profesor_id === p.id);
     wireToggle(`btn-toggle-alumnos-profe-${p.id}`, `alumnos-profe-holder-${p.id}`, () => {
@@ -1571,7 +1576,7 @@ function renderGestionProfesores(holderId, profesores, alumnos, onCambio){
   };
 }
 
-// Lista de alumnos actuales de un profesor (clickeable a su ficha) + botón para descargarla en PDF.
+// Lista de alumnos actuales de un profesor (clickeable a su ficha), con el estado de sus 3 protocolos.
 function renderListaAlumnosProfesor(holderId, profesor, alumnosDelProfesor){
   const holder = document.getElementById(holderId);
   if(!alumnosDelProfesor.length){
@@ -1580,37 +1585,75 @@ function renderListaAlumnosProfesor(holderId, profesor, alumnosDelProfesor){
   }
   holder.innerHTML = `
     <div class="card">
-      <div class="row-flex" style="margin-bottom:10px;">
-        <label style="margin:0;">${alumnosDelProfesor.length} alumno${alumnosDelProfesor.length === 1 ? '' : 's'}</label>
-        <button class="btn-sm" id="btn-pdf-alumnos-profe-${profesor.id}">${ICONS.download} Descargar PDF</button>
-      </div>
+      <label style="margin-bottom:10px; display:block;">${alumnosDelProfesor.length} alumno${alumnosDelProfesor.length === 1 ? '' : 's'}</label>
       ${alumnosDelProfesor.map(a => `
-        <div class="set-line" style="cursor:pointer;" onclick="renderCoachAlumnoDetail('${a.id}')"><span>${escapeHtml(a.nombre)}</span>${a.ultima ? `<span>${formatDateShort(a.ultima)}</span>` : ''}</div>
+        <div class="set-line" style="cursor:pointer; flex-direction:column; align-items:flex-start; gap:4px; padding:8px 0;" onclick="renderCoachAlumnoDetail('${a.id}')">
+          <div style="display:flex; justify-content:space-between; width:100%;">
+            <span>${escapeHtml(a.nombre)}</span>
+            ${a.ultima ? `<span>${formatDateShort(a.ultima)}</span>` : ''}
+          </div>
+          <div style="font-size:10.5px;">${renderEstadoVencimiento('Rutina', a.rutinaFecha, 30, 'sin rutina activa')} · ${renderEstadoVencimiento('Medición', a.medicionFecha, 60, 'sin mediciones')} · ${a.entrevista_audio_url ? 'Entrevista: ' + (a.entrevista_fecha ? formatDateShort(a.entrevista_fecha) : 'realizada') : 'Entrevista: NO realizada'}</div>
+        </div>
       `).join('')}
     </div>
   `;
-  document.getElementById(`btn-pdf-alumnos-profe-${profesor.id}`).onclick = () => descargarPDFAlumnosProfesor(profesor, alumnosDelProfesor);
 }
 
-function descargarPDFAlumnosProfesor(profesor, alumnosDelProfesor){
+// PDF único: todos los alumnos agrupados por profesor, con el estado de sus 3 protocolos
+// (rutina, medición, entrevista). Usa los mismos datos ya cargados en renderCoachHome
+// (conUltima), así que no dispara consultas nuevas.
+function descargarPDFEstadoProtocolos(profesores, alumnos){
+  if(!alumnos || !alumnos.length){ showToast('No hay alumnos registrados todavía'); return; }
+
+  const grupos = [...profesores]
+    .sort((a,b) => a.nombre.localeCompare(b.nombre))
+    .map(p => ({ nombre: p.nombre, alumnos: alumnos.filter(a => a.profesor_id === p.id) }));
+  const sinAsignar = alumnos.filter(a => !a.profesor_id);
+  if(sinAsignar.length) grupos.push({ nombre: 'Sin profesor asignado', alumnos: sinAsignar });
+
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
   doc.setFontSize(18);
   doc.text('UltraCarga', 14, 18);
   doc.setFontSize(13);
-  doc.text(`Alumnos de ${profesor.nombre}`, 14, 28);
+  doc.text('Estado de protocolos por alumno', 14, 28);
   doc.setFontSize(10);
-  doc.text(`Generado el ${formatDateShort(todayStr())} · ${alumnosDelProfesor.length} alumno${alumnosDelProfesor.length === 1 ? '' : 's'}`, 14, 35);
+  doc.text(`Generado el ${formatDateShort(todayStr())} · Rutina: vence a 30 días · Medición: vence a 2 meses`, 14, 35);
 
   let y = 46;
-  doc.setFontSize(11);
-  alumnosDelProfesor.forEach((a, i) => {
-    if(y > 280){ doc.addPage(); y = 20; }
-    doc.text(`${i+1}. ${a.nombre}`, 14, y);
-    y += 7;
+  grupos.forEach(g => {
+    if(!g.alumnos.length) return;
+    if(y > 265){ doc.addPage(); y = 20; }
+    doc.setFontSize(12);
+    doc.setFont(undefined, 'bold');
+    doc.text(`${g.nombre} (${g.alumnos.length})`, 14, y);
+    doc.setFont(undefined, 'normal');
+    y += 3;
+    doc.setLineWidth(0.2);
+    doc.line(14, y, 196, y);
+    y += 8;
+
+    [...g.alumnos].sort((a,b) => a.nombre.localeCompare(b.nombre)).forEach(a => {
+      if(y > 275){ doc.addPage(); y = 20; }
+      doc.setFontSize(10.5);
+      doc.setFont(undefined, 'bold');
+      doc.text(a.nombre, 14, y);
+      doc.setFont(undefined, 'normal');
+      y += 5.5;
+
+      doc.setFontSize(9);
+      const rutinaVencida = estaVencida(a.rutinaFecha, 30);
+      const rutinaTxt = a.rutinaFecha ? `Rutina: ${formatDateShort(a.rutinaFecha)}${rutinaVencida ? ' (VENCIDA)' : ''}` : 'Rutina: sin rutina activa';
+      const medicionVencida = estaVencida(a.medicionFecha, 60);
+      const medicionTxt = a.medicionFecha ? `Medición: ${formatDateShort(a.medicionFecha)}${medicionVencida ? ' (VENCIDA)' : ''}` : 'Medición: sin mediciones';
+      const entrevistaTxt = a.entrevista_audio_url ? `Entrevista: ${a.entrevista_fecha ? formatDateShort(a.entrevista_fecha) : 'realizada'}` : 'Entrevista: NO realizada';
+      doc.text(`   ${rutinaTxt}   ·   ${medicionTxt}   ·   ${entrevistaTxt}`, 14, y);
+      y += 7;
+    });
+    y += 5;
   });
 
-  doc.save(`Alumnos_${profesor.nombre.replace(/\s+/g,'_')}.pdf`);
+  doc.save(`Estado_protocolos_${todayStr()}.pdf`);
 }
 
 async function renderCoachAlumnoDetail(alumnoId){
