@@ -1423,14 +1423,23 @@ async function renderCoachHome(){
         ${toggleStateHtml()}
       </button>
       <div class="hidden" id="buzon-holder"></div>
-    ` : ''}
-    ${esSuperAdmin && conUltima.length ? `
-      <div style="position:relative; margin-bottom:14px;">
-        <span style="position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--chalk-dim); display:flex;">${ICONS.search}</span>
-        <input type="text" id="input-buscar-alumno" placeholder="Buscar alumno por nombre..." style="padding-left:36px; margin-bottom:0;" autocomplete="off">
+
+      <button class="btn-toggle-rutina" id="btn-toggle-alumnos">
+        <span class="toggle-label">${ICONS.users} Alumnos</span>
+        ${toggleStateHtml()}
+      </button>
+      <div class="hidden" id="alumnos-holder">
+        ${conUltima.length ? `
+          <div style="position:relative; margin-bottom:14px;">
+            <span style="position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--chalk-dim); display:flex;">${ICONS.search}</span>
+            <input type="text" id="input-buscar-alumno" placeholder="Buscar alumno por nombre..." style="padding-left:36px; margin-bottom:0;" autocomplete="off">
+          </div>
+        ` : ''}
+        <div id="coach-alumnos-list"></div>
       </div>
-    ` : ''}
-    <div id="coach-alumnos-list"></div>
+    ` : `
+      <div id="coach-alumnos-list"></div>
+    `}
   `;
   document.getElementById('btn-logout').onclick = handleLogout;
 
@@ -1439,6 +1448,7 @@ async function renderCoachHome(){
       renderGestionProfesores('profesores-holder', profesores, conUltima, renderCoachHome);
     });
     wireToggle('btn-toggle-buzon', 'buzon-holder', () => renderBuzonOpiniones('buzon-holder'));
+    wireToggle('btn-toggle-alumnos', 'alumnos-holder');
 
     const inputBuscar = document.getElementById('input-buscar-alumno');
     if(inputBuscar){
@@ -1507,13 +1517,18 @@ function renderGestionProfesores(holderId, profesores, alumnos, onCambio){
     <div class="card" style="margin-bottom:16px;">
       <label style="margin-bottom:8px; display:block;">Profesores</label>
       ${profesores.length ? profesores.map(p => `
-        <div class="coach-list-item" style="cursor:default; align-items:flex-start;">
+        <div class="coach-list-item" style="cursor:default; align-items:flex-start; margin-bottom:4px;">
           <div style="flex:1; min-width:0;">
             <div class="coach-name">${escapeHtml(p.nombre)}</div>
             <div class="coach-meta">${conteos[p.id] || 0} alumno${(conteos[p.id]||0) === 1 ? '' : 's'} asignado${(conteos[p.id]||0) === 1 ? '' : 's'}</div>
           </div>
           <button class="btn-sm btn-copiar-link" data-id="${p.id}">${ICONS.link} Copiar link</button>
         </div>
+        <button class="btn-toggle-rutina" id="btn-toggle-alumnos-profe-${p.id}" style="margin-bottom:14px;">
+          <span class="toggle-label">${ICONS.users} Alumnos de ${escapeHtml(p.nombre)}</span>
+          ${toggleStateHtml()}
+        </button>
+        <div class="hidden" id="alumnos-profe-holder-${p.id}" style="margin-bottom:14px;"></div>
       `).join('') : `<div class="empty">Aún no hay profesores.</div>`}
     </div>
     <div class="card">
@@ -1538,6 +1553,13 @@ function renderGestionProfesores(holderId, profesores, alumnos, onCambio){
     };
   });
 
+  profesores.forEach(p => {
+    const suyos = (alumnos||[]).filter(a => a.profesor_id === p.id);
+    wireToggle(`btn-toggle-alumnos-profe-${p.id}`, `alumnos-profe-holder-${p.id}`, () => {
+      renderListaAlumnosProfesor(`alumnos-profe-holder-${p.id}`, p, suyos);
+    });
+  });
+
   document.getElementById('btn-hacer-profesor').onclick = async () => {
     const sel = document.getElementById('select-nuevo-profesor');
     const alumnoId = sel.value;
@@ -1547,6 +1569,48 @@ function renderGestionProfesores(holderId, profesores, alumnos, onCambio){
     showToast('Ahora es profesor');
     if(onCambio) onCambio();
   };
+}
+
+// Lista de alumnos actuales de un profesor (clickeable a su ficha) + botón para descargarla en PDF.
+function renderListaAlumnosProfesor(holderId, profesor, alumnosDelProfesor){
+  const holder = document.getElementById(holderId);
+  if(!alumnosDelProfesor.length){
+    holder.innerHTML = `<div class="empty">Este profesor todavía no tiene alumnos asignados.</div>`;
+    return;
+  }
+  holder.innerHTML = `
+    <div class="card">
+      <div class="row-flex" style="margin-bottom:10px;">
+        <label style="margin:0;">${alumnosDelProfesor.length} alumno${alumnosDelProfesor.length === 1 ? '' : 's'}</label>
+        <button class="btn-sm" id="btn-pdf-alumnos-profe-${profesor.id}">${ICONS.download} Descargar PDF</button>
+      </div>
+      ${alumnosDelProfesor.map(a => `
+        <div class="set-line" style="cursor:pointer;" onclick="renderCoachAlumnoDetail('${a.id}')"><span>${escapeHtml(a.nombre)}</span>${a.ultima ? `<span>${formatDateShort(a.ultima)}</span>` : ''}</div>
+      `).join('')}
+    </div>
+  `;
+  document.getElementById(`btn-pdf-alumnos-profe-${profesor.id}`).onclick = () => descargarPDFAlumnosProfesor(profesor, alumnosDelProfesor);
+}
+
+function descargarPDFAlumnosProfesor(profesor, alumnosDelProfesor){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  doc.setFontSize(18);
+  doc.text('UltraCarga', 14, 18);
+  doc.setFontSize(13);
+  doc.text(`Alumnos de ${profesor.nombre}`, 14, 28);
+  doc.setFontSize(10);
+  doc.text(`Generado el ${formatDateShort(todayStr())} · ${alumnosDelProfesor.length} alumno${alumnosDelProfesor.length === 1 ? '' : 's'}`, 14, 35);
+
+  let y = 46;
+  doc.setFontSize(11);
+  alumnosDelProfesor.forEach((a, i) => {
+    if(y > 280){ doc.addPage(); y = 20; }
+    doc.text(`${i+1}. ${a.nombre}`, 14, y);
+    y += 7;
+  });
+
+  doc.save(`Alumnos_${profesor.nombre.replace(/\s+/g,'_')}.pdf`);
 }
 
 async function renderCoachAlumnoDetail(alumnoId){
