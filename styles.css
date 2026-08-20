@@ -1,7 +1,7 @@
 :root{
   --ink:#1A1D1C; --graphite:#20231F; --surface:#242724; --surface-2:#2D302A;
   --chalk:#EFEDE4; --chalk-dim:#9CA39A; --blue:#3D6EE0; --orange:#E8672E; --line:#3A3E37;
-  --green:#4CAF6D;
+  --green:#4CAF6D; --red:#E5484D;
 }
 *{box-sizing:border-box;}
 body{margin:0; background:var(--ink); color:var(--chalk); font-family:'Inter',sans-serif; min-height:100vh; -webkit-font-smoothing:antialiased;}

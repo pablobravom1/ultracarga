@@ -37,7 +37,8 @@ const ICONS = {
   link: `<svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>`,
   message: `<svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>`,
   share: `<svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"></path><polyline points="16 6 12 2 8 6"></polyline><line x1="12" y1="2" x2="12" y2="15"></line></svg>`,
-  search: `<svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>`
+  search: `<svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>`,
+  mic: `<svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`
 };
 // Markup del lado derecho de un botón-toggle: texto según estado + flecha que rota.
 function toggleStateHtml(closedTxt){
@@ -109,6 +110,18 @@ function addDaysStr(iso, days){
   const d = new Date(iso + 'T12:00:00');
   d.setDate(d.getDate() + days);
   return d.toISOString().slice(0,10);
+}
+// Vigencia (solo vista profe/super admin): true si la fecha ya pasó su plazo de días.
+function estaVencida(fechaIso, diasVigencia){
+  if(!fechaIso) return false;
+  return fechaIso < addDaysStr(todayStr(), -diasVigencia);
+}
+// Línea de estado "Rutina: 12 ago (vencida)" — en rojo si venció. Uso exclusivo de vistas de coach/super admin.
+function renderEstadoVencimiento(label, fechaIso, diasVigencia, sinRegistroTexto){
+  if(!fechaIso) return `<span>${escapeHtml(label)}: ${escapeHtml(sinRegistroTexto)}</span>`;
+  const vencida = estaVencida(fechaIso, diasVigencia);
+  const texto = `${escapeHtml(label)}: ${formatDateShort(fechaIso)}${vencida ? ' (vencida)' : ''}`;
+  return vencida ? `<span style="color:var(--red); font-weight:600;">${texto}</span>` : `<span>${texto}</span>`;
 }
 
 function computeStreak(fechas){
@@ -686,6 +699,86 @@ async function eliminarMedicion(id, alumnoId, holderId){
   renderMediciones(holderId, alumnoId);
 }
 
+// ---------- ENTREVISTA INICIAL (audio, solo profe/super admin — no aparece en la vista del alumno) ----------
+async function renderEntrevista(holderId, alumnoId, audioUrl, fecha){
+  const holder = document.getElementById(holderId);
+  holder.innerHTML = audioUrl ? `
+    <div class="card">
+      <div class="sub" style="margin-bottom:8px;">${fecha ? 'Grabada el ' + formatDateShort(fecha) : 'Fecha no registrada'}</div>
+      <audio controls style="width:100%;" src="${audioUrl}"></audio>
+      <button class="btn-sm btn-eliminar-sesion" id="btn-eliminar-entrevista" style="margin-top:12px;">Eliminar entrevista</button>
+    </div>
+  ` : `
+    <div class="card">
+      <label>Fecha de la entrevista</label>
+      <input type="date" id="input-fecha-entrevista" value="${todayStr()}" max="${todayStr()}">
+      <label class="photo-input-label" for="input-audio-entrevista">
+        <span id="entrevista-audio-label-text">${ICONS.mic} Sube el audio de la entrevista</span>
+        <input type="file" id="input-audio-entrevista" accept="audio/*">
+      </label>
+      <button class="btn" id="btn-guardar-entrevista">${ICONS.plus} Guardar entrevista</button>
+    </div>
+  `;
+
+  if(audioUrl){
+    const btnDel = document.getElementById('btn-eliminar-entrevista');
+    btnDel.onclick = () => {
+      if(btnDel.dataset.confirm === '1'){
+        eliminarEntrevista(alumnoId, holderId);
+      } else {
+        btnDel.dataset.confirm = '1';
+        btnDel.textContent = '¿Seguro? Toca de nuevo para eliminar';
+        btnDel.classList.add('btn-danger-confirm');
+        setTimeout(() => {
+          if(!btnDel.isConnected) return;
+          btnDel.dataset.confirm = '';
+          btnDel.textContent = 'Eliminar entrevista';
+          btnDel.classList.remove('btn-danger-confirm');
+        }, 3000);
+      }
+    };
+  } else {
+    document.getElementById('input-audio-entrevista').onchange = (e) => {
+      const f = e.target.files[0];
+      document.getElementById('entrevista-audio-label-text').innerHTML = f ? `${ICONS.check} ${escapeHtml(f.name)}` : `${ICONS.mic} Sube el audio de la entrevista`;
+    };
+    document.getElementById('btn-guardar-entrevista').onclick = () => guardarEntrevista(alumnoId, holderId);
+  }
+}
+
+async function guardarEntrevista(alumnoId, holderId){
+  const btn = document.getElementById('btn-guardar-entrevista');
+  const fechaInput = document.getElementById('input-fecha-entrevista');
+  const audioInput = document.getElementById('input-audio-entrevista');
+  const file = audioInput.files[0];
+  if(!file){ showToast('Selecciona el archivo de audio'); return; }
+  const MAX_BYTES = 20 * 1024 * 1024; // ~20MB — de sobra para una nota de voz de 1 min ya comprimida (celular/WhatsApp)
+  if(file.size > MAX_BYTES){ showToast('El audio es muy pesado (máx. 20MB). Usa la nota de voz del celular o de WhatsApp, que ya vienen comprimidas.'); return; }
+
+  btn.disabled = true; btn.textContent = 'Guardando...';
+  try{
+    const ext = file.name.split('.').pop();
+    const path = `${alumnoId}/${Date.now()}.${ext}`;
+    const { error: upErr } = await sb.storage.from('entrevistas').upload(path, file, { upsert: true });
+    if(upErr){ showToast('No se pudo subir el audio'); btn.disabled = false; btn.innerHTML = `${ICONS.plus} Guardar entrevista`; return; }
+    const entrevista_audio_url = sb.storage.from('entrevistas').getPublicUrl(path).data.publicUrl;
+    const { error } = await sb.from('profiles').update({ entrevista_audio_url, entrevista_fecha: fechaInput.value }).eq('id', alumnoId);
+    if(error){ showToast('No se pudo guardar la entrevista'); btn.disabled = false; btn.innerHTML = `${ICONS.plus} Guardar entrevista`; return; }
+    showToast('¡Entrevista guardada!');
+    renderEntrevista(holderId, alumnoId, entrevista_audio_url, fechaInput.value);
+  }catch(e){
+    showToast('Hubo un problema guardando la entrevista');
+    btn.disabled = false; btn.innerHTML = `${ICONS.plus} Guardar entrevista`;
+  }
+}
+
+async function eliminarEntrevista(alumnoId, holderId){
+  const { error } = await sb.from('profiles').update({ entrevista_audio_url: null, entrevista_fecha: null }).eq('id', alumnoId);
+  if(error){ showToast('No se pudo eliminar la entrevista'); return; }
+  showToast('Entrevista eliminada');
+  renderEntrevista(holderId, alumnoId, null, null);
+}
+
 // ---------- OPINAR SOBRE EL SERVICIO (buzón privado alumno → super admin) ----------
 async function renderOpinionForm(holderId, alumnoId){
   const holder = document.getElementById(holderId);
@@ -1191,14 +1284,15 @@ async function renderHistorialRutinas(alumno, volverFn, permitirDuplicar){
     const dias = groupPorDia(r.rutina_ejercicios);
     return `
     <div class="card">
-      <div class="row-flex" style="margin-bottom:${permitirDuplicar ? '6px' : '0'};">
+      <div class="row-flex" style="margin-bottom:6px;">
         <h2 style="margin:0;">${escapeHtml(r.nombre)}</h2>
-        ${permitirDuplicar ? `
-          <div style="display:flex; gap:6px;">
+        <div style="display:flex; gap:6px;">
+          <button class="btn-sm" data-pdf-id="${r.id}">${ICONS.download} PDF</button>
+          ${permitirDuplicar ? `
             <button class="btn-sm" data-dup-id="${r.id}">Usar como base</button>
             <button class="btn-sm" data-del-id="${r.id}">Eliminar</button>
-          </div>
-        ` : ''}
+          ` : ''}
+        </div>
       </div>
       ${r.objetivo ? `<div class="sub" style="margin-bottom:6px;">${escapeHtml(r.objetivo)}</div>` : ''}
       <div class="sub" style="margin-bottom:10px;">Creada el ${formatDateShort(String(r.created_at).slice(0,10))}</div>
@@ -1211,6 +1305,13 @@ async function renderHistorialRutinas(alumno, volverFn, permitirDuplicar){
     </div>
   `;
   }).join('');
+
+  listEl.querySelectorAll('[data-pdf-id]').forEach(btn => {
+    btn.onclick = () => {
+      const rutina = rutinas.find(r => r.id === btn.dataset.pdfId);
+      descargarRutinaPDF(rutina, groupPorDia(rutina.rutina_ejercicios));
+    };
+  });
 
   if(permitirDuplicar){
     listEl.querySelectorAll('[data-dup-id]').forEach(btn => {
@@ -1281,8 +1382,17 @@ async function renderCoachHome(){
   const profesores = profesoresRes.data || [];
 
   const conUltima = await Promise.all((alumnos||[]).map(async a => {
-    const { data } = await sb.from('sesiones').select('fecha').eq('alumno_id', a.id).order('fecha', { ascending:false }).limit(1);
-    return { ...a, ultima: data && data[0] ? data[0].fecha : null };
+    const [{ data }, { data: rutinaActiva }, { data: medData }] = await Promise.all([
+      sb.from('sesiones').select('fecha').eq('alumno_id', a.id).order('fecha', { ascending:false }).limit(1),
+      sb.from('rutinas').select('fecha').eq('alumno_id', a.id).eq('activa', true).maybeSingle(),
+      sb.from('mediciones').select('fecha').eq('alumno_id', a.id).order('fecha', { ascending:false }).limit(1)
+    ]);
+    return {
+      ...a,
+      ultima: data && data[0] ? data[0].fecha : null,
+      rutinaFecha: rutinaActiva ? rutinaActiva.fecha : null,
+      medicionFecha: medData && medData[0] ? medData[0].fecha : null
+    };
   }));
 
   const nombreProfesor = (profesorId) => {
@@ -1358,6 +1468,7 @@ function renderListaAlumnos(lista, esSuperAdmin, profesores, nombreProfesor, tot
       <div style="flex:1; min-width:0; cursor:pointer;" onclick="renderCoachAlumnoDetail('${a.id}')">
         <div class="coach-name">${escapeHtml(a.nombre)}</div>
         <div class="coach-meta">${a.ultima ? 'Última sesión: ' + formatDateShort(a.ultima) : 'Sin sesiones todavía'}${esSuperAdmin ? ' · ' + (nombreProfesor(a.profesor_id) ? escapeHtml(nombreProfesor(a.profesor_id)) : 'Sin profesor asignado') : ''}</div>
+        <div class="coach-meta" style="margin-top:2px;">${renderEstadoVencimiento('Rutina', a.rutinaFecha, 30, 'sin rutina activa')} · ${renderEstadoVencimiento('Medición', a.medicionFecha, 60, 'sin mediciones')}</div>
       </div>
       ${esSuperAdmin ? `
         <select class="select-inline select-asignar-profesor" data-alumno="${a.id}">
@@ -1440,17 +1551,20 @@ function renderGestionProfesores(holderId, profesores, alumnos, onCambio){
 
 async function renderCoachAlumnoDetail(alumnoId){
   root().innerHTML = `<div class="loading">Cargando...</div>`;
-  const [{ data: alumno }, { data: sesiones }, { data: rutina }, { data: historial }] = await Promise.all([
+  const [{ data: alumno }, { data: sesiones }, { data: rutina }, { data: historial }, { data: medicionesUltima }] = await Promise.all([
     sb.from('profiles').select('*').eq('id', alumnoId).single(),
     sb.from('sesiones').select('*, sesion_series(*)').eq('alumno_id', alumnoId).order('fecha', { ascending:false }),
     sb.from('rutinas').select('*, rutina_ejercicios(*)').eq('alumno_id', alumnoId).eq('activa', true).maybeSingle(),
-    sb.from('rutinas').select('id').eq('alumno_id', alumnoId).eq('activa', false)
+    sb.from('rutinas').select('id').eq('alumno_id', alumnoId).eq('activa', false),
+    sb.from('mediciones').select('fecha').eq('alumno_id', alumnoId).order('fecha', { ascending:false }).limit(1)
   ]);
 
   const todasSesiones = markPRs(sesiones || []);
   const conSeries = todasSesiones.filter(s => (s.sesion_series||[]).length > 0);
   const fechas = conSeries.map(s => s.fecha);
   const diasRutina = (rutina && rutina.rutina_ejercicios) ? groupPorDia(rutina.rutina_ejercicios) : [];
+  const medicionFecha = medicionesUltima && medicionesUltima[0] ? medicionesUltima[0].fecha : null;
+  const rutinaVencida = rutina ? estaVencida(rutina.fecha, 30) : false;
 
   root().innerHTML = `
     <div class="header-actions">
@@ -1461,9 +1575,14 @@ async function renderCoachAlumnoDetail(alumnoId){
       <button class="switch-user" id="btn-volver">${ICONS.arrowLeft} Volver</button>
     </div>
 
+    <div class="card" style="font-size:12.5px;">
+      <div>${renderEstadoVencimiento('Última rutina', rutina ? rutina.fecha : null, 30, 'sin rutina activa')}</div>
+      <div style="margin-top:4px;">${renderEstadoVencimiento('Última medición', medicionFecha, 60, 'sin mediciones registradas')}</div>
+    </div>
+
     ${rutina ? `
       <button class="btn-toggle-rutina" id="btn-toggle-rutina">
-        <span class="toggle-label">${ICONS.clipboard} Rutina: ${escapeHtml(rutina.nombre)}</span>
+        <span class="toggle-label" style="${rutinaVencida ? 'color:var(--red);' : ''}">${ICONS.clipboard} Rutina: ${escapeHtml(rutina.nombre)}${rutinaVencida ? ' (vencida)' : ''}</span>
         ${toggleStateHtml()}
       </button>
     ` : `
@@ -1478,7 +1597,7 @@ async function renderCoachAlumnoDetail(alumnoId){
     ${rutina ? `
       <div class="card hidden" id="rutina-detail-card">
         <div class="row-flex" style="margin-bottom:6px;">
-          <h2 style="margin:0;">${escapeHtml(rutina.nombre)}</h2>
+          <h2 style="margin:0; ${rutinaVencida ? 'color:var(--red);' : ''}">${escapeHtml(rutina.nombre)}${rutinaVencida ? ' (vencida)' : ''}</h2>
           <div style="display:flex; gap:6px;">
             <button class="btn-sm" id="btn-editar-rutina">Editar</button>
             <button class="btn-sm" id="btn-nueva-rutina">Crear nueva rutina</button>
@@ -1500,6 +1619,12 @@ async function renderCoachAlumnoDetail(alumnoId){
       ${toggleStateHtml()}
     </button>
     <div class="hidden" id="mediciones-holder"></div>
+
+    <button class="btn-toggle-rutina" id="btn-toggle-entrevista">
+      <span class="toggle-label">${ICONS.mic} Entrevista inicial</span>
+      ${toggleStateHtml()}
+    </button>
+    <div class="hidden" id="entrevista-holder"></div>
 
     <button class="btn-toggle-rutina" id="btn-toggle-calendario">
       <span class="toggle-label">${ICONS.calendar} Calendario</span>
@@ -1526,6 +1651,12 @@ async function renderCoachAlumnoDetail(alumnoId){
     let medicionesInicializado = false;
     wireToggle('btn-toggle-mediciones', 'mediciones-holder', () => {
       if(!medicionesInicializado){ renderMediciones('mediciones-holder', alumnoId); medicionesInicializado = true; }
+    });
+  }
+  {
+    let entrevistaInicializada = false;
+    wireToggle('btn-toggle-entrevista', 'entrevista-holder', () => {
+      if(!entrevistaInicializada){ renderEntrevista('entrevista-holder', alumnoId, alumno.entrevista_audio_url, alumno.entrevista_fecha); entrevistaInicializada = true; }
     });
   }
   wireToggle('btn-toggle-calendario', 'calendar-holder');
@@ -1754,7 +1885,7 @@ async function guardarRutina(alumno){
   await sb.from('rutinas').update({ activa: false }).eq('alumno_id', alumno.id).eq('activa', true);
 
   const { data: rutina, error } = await sb.from('rutinas').insert({
-    alumno_id: alumno.id, nombre, objetivo: objetivo || null, activa: true
+    alumno_id: alumno.id, nombre, objetivo: objetivo || null, activa: true, fecha: todayStr()
   }).select().single();
 
   if(error){ showToast('No se pudo crear la rutina'); btn.disabled=false; btn.textContent='Guardar rutina'; return; }
