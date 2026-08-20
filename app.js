@@ -14,6 +14,7 @@ let activeSesionDia = null;  // día del programa que el alumno eligió entrenar
 let rutinaEditorDias = [];   // bloques de día del editor de rutina (coach)
 let rutinaEditorId = null;   // si se está editando una rutina existente en vez de crear una nueva
 let progresoChart = null;
+let cacheSeriesHistorial = {}; // set.id -> {reps, peso, nota, i, _isPR} — para poder editar una serie ya guardada desde el historial
 
 const root = () => document.getElementById('app-root');
 
@@ -455,49 +456,72 @@ function irASesion(fecha){
 }
 
 // Línea de una serie ya guardada, dentro del historial de sesiones.
-// El coach la ve de solo lectura; el alumno puede agregar/editar la nota
-// de esa serie después de haberla guardado (antes solo se podía al toque).
+// El coach la ve de solo lectura. El alumno puede editar reps, peso y
+// nota de una serie ya guardada — es su propio registro de entrenamiento,
+// así que la decisión es dejarlo abierto: si alguien lo edita mal, solo
+// se engaña a sí mismo con su propio historial.
 function renderSetLineHistorial(set, i, isCoachView){
-  const pr = set._isPR ? '<span class="pill pr">🏆 PR</span>' : '';
   if(isCoachView){
+    const pr = set._isPR ? '<span class="pill pr">🏆 PR</span>' : '';
     const nota = set.nota ? `<span class="pill" style="padding:2px 8px; font-size:10.5px;">${escapeHtml(set.nota)}</span>` : '';
     return `<div class="set-line">S${i+1}: <b>${set.reps}</b> reps × <b>${set.peso}kg</b> ${nota} ${pr}</div>`;
   }
-  return `<div class="set-line">
-    <span>S${i+1}: <b>${set.reps}</b> reps × <b>${set.peso}kg</b> ${pr}</span>
-    <span id="nota-serie-${set.id}" style="display:inline-flex; align-items:center; gap:6px;">
-      ${set.nota ? `<span class="pill" style="padding:2px 8px; font-size:10.5px;">${escapeHtml(set.nota)}</span>` : ''}
-      <button type="button" class="link-btn" onclick="mostrarEditorNotaSerie('${set.id}')">${set.nota ? 'Editar' : '+ nota'}</button>
-    </span>
-  </div>`;
+  cacheSeriesHistorial[set.id] = { reps: set.reps, peso: set.peso, nota: set.nota || '', i, _isPR: !!set._isPR };
+  return `<div class="set-line" id="set-line-${set.id}">${lineaSerieVista(set.id)}</div>`;
 }
 
-function mostrarEditorNotaSerie(setId){
-  const holder = document.getElementById(`nota-serie-${setId}`);
-  if(!holder) return;
-  const pillActual = holder.querySelector('.pill');
-  const valorActual = pillActual ? pillActual.textContent : '';
-  holder.innerHTML = `
-    <input type="text" id="input-editar-nota-${setId}" value="${escapeHtml(valorActual)}" placeholder="Nota de esta serie" style="display:inline-block; width:150px; margin:0; padding:4px 8px; font-size:11.5px;">
-    <button type="button" class="link-btn" onclick="guardarNotaSerie('${setId}')">Guardar</button>
+function lineaSerieVista(setId){
+  const s = cacheSeriesHistorial[setId];
+  if(!s) return '';
+  const pr = s._isPR ? '<span class="pill pr">🏆 PR</span>' : '';
+  const nota = s.nota ? `<span class="pill" style="padding:2px 8px; font-size:10.5px;">${escapeHtml(s.nota)}</span>` : '';
+  return `
+    <span>S${s.i+1}: <b>${s.reps}</b> reps × <b>${s.peso}kg</b> ${nota} ${pr}</span>
+    <button type="button" class="link-btn" onclick="mostrarEditorSerieHistorial('${setId}')">Editar</button>
   `;
-  const input = document.getElementById(`input-editar-nota-${setId}`);
+}
+
+function mostrarEditorSerieHistorial(setId){
+  const holder = document.getElementById(`set-line-${setId}`);
+  const s = cacheSeriesHistorial[setId];
+  if(!holder || !s) return;
+  holder.innerHTML = `
+    <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; width:100%;">
+      <span style="white-space:nowrap;">S${s.i+1}:</span>
+      <input type="number" id="edit-reps-${setId}" value="${s.reps}" placeholder="Reps" style="width:60px; margin:0; padding:4px 6px; font-size:11.5px;">
+      <span style="white-space:nowrap;">reps ×</span>
+      <input type="number" id="edit-peso-${setId}" value="${s.peso}" placeholder="Peso" style="width:60px; margin:0; padding:4px 6px; font-size:11.5px;">
+      <span style="white-space:nowrap;">kg</span>
+      <input type="text" id="edit-nota-${setId}" value="${escapeHtml(s.nota)}" placeholder="Nota (opcional)" style="flex:1; min-width:110px; margin:0; padding:4px 6px; font-size:11.5px;">
+      <button type="button" class="link-btn" onclick="guardarSerieHistorial('${setId}')">Guardar</button>
+      <button type="button" class="link-btn" onclick="cancelarEdicionSerieHistorial('${setId}')">Cancelar</button>
+    </div>
+  `;
+  const input = document.getElementById(`edit-reps-${setId}`);
   if(input){ input.focus(); input.select(); }
 }
 
-async function guardarNotaSerie(setId){
-  const input = document.getElementById(`input-editar-nota-${setId}`);
-  const val = input ? input.value.trim() : '';
-  const { error } = await sb.from('sesion_series').update({ nota: val || null }).eq('id', setId);
-  if(error){ showToast('No se pudo guardar la nota, intenta de nuevo'); return; }
-  const holder = document.getElementById(`nota-serie-${setId}`);
-  if(holder){
-    holder.innerHTML = `
-      ${val ? `<span class="pill" style="padding:2px 8px; font-size:10.5px;">${escapeHtml(val)}</span>` : ''}
-      <button type="button" class="link-btn" onclick="mostrarEditorNotaSerie('${setId}')">${val ? 'Editar' : '+ nota'}</button>
-    `;
-  }
-  showToast('Nota guardada ✓');
+function cancelarEdicionSerieHistorial(setId){
+  const holder = document.getElementById(`set-line-${setId}`);
+  if(holder) holder.innerHTML = lineaSerieVista(setId);
+}
+
+async function guardarSerieHistorial(setId){
+  const repsEl = document.getElementById(`edit-reps-${setId}`);
+  const pesoEl = document.getElementById(`edit-peso-${setId}`);
+  const notaEl = document.getElementById(`edit-nota-${setId}`);
+  const reps = repsEl ? repsEl.value : '';
+  const peso = pesoEl ? pesoEl.value : '';
+  const nota = notaEl ? notaEl.value.trim() : '';
+  if(!reps){ showToast('Completa las repeticiones'); return; }
+
+  const { error } = await sb.from('sesion_series').update({ reps, peso: peso || 0, nota: nota || null }).eq('id', setId);
+  if(error){ showToast('No se pudo guardar, intenta de nuevo'); return; }
+
+  cacheSeriesHistorial[setId] = { ...cacheSeriesHistorial[setId], reps, peso: peso || 0, nota };
+  const holder = document.getElementById(`set-line-${setId}`);
+  if(holder) holder.innerHTML = lineaSerieVista(setId);
+  showToast('Serie actualizada ✓');
 }
 
 function renderSesionesList(holderId, sesiones, isCoachView, onDeleted){
