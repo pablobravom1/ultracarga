@@ -1712,6 +1712,15 @@ function filaGrid(doc, x, y, colWidths, celdas, opts){
     cx += w;
   });
 
+  // Bordes de celda tipo planilla Excel — una línea gris fina alrededor de cada celda.
+  doc.setDrawColor(176, 176, 168);
+  doc.setLineWidth(0.15);
+  cx = x;
+  colWidths.forEach((w) => {
+    doc.rect(cx, y, w, rowH, 'S');
+    cx += w;
+  });
+
   cx = x;
   colWidths.forEach((w, i) => {
     const val = celdas[i] || {};
