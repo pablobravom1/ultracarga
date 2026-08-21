@@ -1,6 +1,6 @@
 {
-  "name": "UltraCarga",
-  "short_name": "UltraCarga",
+  "name": "STC app",
+  "short_name": "STC app",
   "description": "Registra tus entrenamientos y sigue tu rutina.",
   "start_url": "./",
   "scope": "./",

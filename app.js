@@ -870,11 +870,11 @@ function setupProgresoChart(sesiones){
         datasets: [{
           label: 'Peso máximo (kg)',
           data: puntos.map(p => p.peso),
-          borderColor: '#3D6EE0',
-          backgroundColor: 'rgba(61,110,224,0.15)',
+          borderColor: '#FFC72C',
+          backgroundColor: 'rgba(255,199,44,0.18)',
           tension: 0.25,
           fill: true,
-          pointBackgroundColor: '#3D6EE0'
+          pointBackgroundColor: '#FFC72C'
         }]
       },
       options: {
@@ -1224,7 +1224,7 @@ function descargarRutinaPDF(rutina, dias){
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
   doc.setFontSize(18);
-  doc.text('UltraCarga', 14, 18);
+  doc.text('STC app', 14, 18);
   doc.setFontSize(13);
   doc.text(rutina.nombre, 14, 28);
   let y = 36;
@@ -1592,7 +1592,18 @@ function renderGestionProfesores(holderId, profesores, alumnos, onCambio){
     };
   });
 
-  document.getElementById('btn-pdf-protocolos').onclick = () => descargarPDFEstadoProtocolos(profesores, alumnos);
+  document.getElementById('btn-pdf-protocolos').onclick = async (ev) => {
+    const btn = ev.currentTarget;
+    const original = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = 'Generando...';
+    try{
+      await descargarPDFEstadoProtocolos(profesores, alumnos);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = original;
+    }
+  };
 
   profesores.forEach(p => {
     const suyos = (alumnos||[]).filter(a => a.profesor_id === p.id);
@@ -1635,59 +1646,224 @@ function renderListaAlumnosProfesor(holderId, profesor, alumnosDelProfesor){
   `;
 }
 
-// PDF único: todos los alumnos agrupados por profesor, con el estado de sus 3 protocolos
-// (rutina, medición, entrevista). Usa los mismos datos ya cargados en renderCoachHome
-// (conUltima), así que no dispara consultas nuevas.
-function descargarPDFEstadoProtocolos(profesores, alumnos){
+// ---------- Gráficos de barras para el PDF de protocolos ----------
+// Se dibujan a mano en un canvas (no con Chart.js) porque necesitamos la
+// imagen ya lista para meterla en el PDF, sin depender de animaciones.
+// Rojo/naranja/verde son los mismos colores que ya usa el resto de la app
+// para "vencida"/"al día" — el amarillo institucional se reserva para la
+// marca (encabezado, líneas de sección), no para los datos.
+function pctColorProtocolo(pct){
+  if(pct === null || pct === undefined) return '#9CA39A';
+  if(pct >= 80) return '#4CAF6D';
+  if(pct >= 50) return '#E8672E';
+  return '#E5484D';
+}
+
+function dibujarBarraRedondeada(ctx, x, y, w, h, r){
+  const rad = Math.max(0, Math.min(r, h / 2, Math.abs(w) / 2));
+  ctx.beginPath();
+  if(w <= 0){ return; }
+  ctx.moveTo(x + rad, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rad);
+  ctx.arcTo(x + w, y + h, x, y + h, rad);
+  ctx.arcTo(x, y + h, x, y, rad);
+  ctx.arcTo(x, y, x + w, y, rad);
+  ctx.closePath();
+}
+
+async function crearGraficoBarrasPDF(items){
+  // items: [{ label, value: 0-100, color? }]
+  try{ await document.fonts.load('700 20px Oswald'); }catch(e){}
+  const scale = 3;
+  const width = 980, leftPad = 260, rightPad = 90, barH = 30, gap = 16, topPad = 6;
+  const height = topPad * 2 + items.length * (barH + gap);
+  const canvas = document.createElement('canvas');
+  canvas.width = width * scale;
+  canvas.height = height * scale;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(scale, scale);
+  ctx.textBaseline = 'middle';
+
+  items.forEach((it, i) => {
+    const y = topPad + i * (barH + gap);
+    const trackX = leftPad, trackW = width - leftPad - rightPad;
+
+    ctx.fillStyle = '#1A1D1C';
+    ctx.font = '600 19px Oswald, sans-serif';
+    ctx.textAlign = 'left';
+    let label = it.label;
+    while(ctx.measureText(label).width > leftPad - 14 && label.length > 3){
+      label = label.slice(0, -2) + '…';
+    }
+    ctx.fillText(label, 0, y + barH / 2);
+
+    ctx.fillStyle = '#E9E9E4';
+    dibujarBarraRedondeada(ctx, trackX, y, trackW, barH, 6);
+    ctx.fill();
+
+    if(it.value !== null && it.value !== undefined){
+      const w = trackW * Math.max(0, Math.min(100, it.value)) / 100;
+      ctx.fillStyle = it.color || '#FFC72C';
+      dibujarBarraRedondeada(ctx, trackX, y, w, barH, 6);
+      ctx.fill();
+    }
+
+    ctx.fillStyle = '#1A1D1C';
+    ctx.font = '700 19px Oswald, sans-serif';
+    ctx.textAlign = 'left';
+    const txt = (it.value === null || it.value === undefined) ? 's/d' : `${Math.round(it.value)}%`;
+    ctx.fillText(txt, trackX + trackW + 12, y + barH / 2);
+  });
+
+  return { dataUrl: canvas.toDataURL('image/png'), aspect: width / height };
+}
+
+// Línea de detalle de un alumno (rutina / medición / entrevista) — devuelve el nuevo y.
+function lineaAlumnoPDF(doc, a, x, y){
+  doc.setFontSize(10.5);
+  doc.setFont(undefined, 'bold');
+  doc.text(a.nombre, x, y);
+  doc.setFont(undefined, 'normal');
+  y += 5.5;
+
+  doc.setFontSize(9);
+  const rutinaTxt = a.rutinaFecha ? `Rutina: ${formatDateShort(a.rutinaFecha)}${a.rutinaOk ? '' : ' (VENCIDA)'}` : 'Rutina: sin rutina activa';
+  const medicionTxt = a.medicionFecha ? `Medición: ${formatDateShort(a.medicionFecha)}${a.medicionOk ? '' : ' (VENCIDA)'}` : 'Medición: sin mediciones';
+  const entrevistaTxt = a.entrevistaOk ? `Entrevista: ${a.entrevista_fecha ? formatDateShort(a.entrevista_fecha) : 'realizada'}` : 'Entrevista: NO realizada';
+  doc.text(`   ${rutinaTxt}   ·   ${medicionTxt}   ·   ${entrevistaTxt}`, x, y);
+  return y + 7;
+}
+
+// PDF de estado de protocolos: además del detalle por alumno (como antes), ahora
+// suma por profesor el % de protocolos al día — un total y uno por protocolo — con
+// un gráfico de barras, para poder auditar de un vistazo a quién le falta ponerse
+// al día. "Al día" = rutina vigente (≤30 días) + medición vigente (≤60 días) +
+// entrevista realizada alguna vez (no vence). Ordenado de menor a mayor % total,
+// para que el profesor que más necesita atención aparezca primero.
+async function descargarPDFEstadoProtocolos(profesores, alumnos){
   if(!alumnos || !alumnos.length){ showToast('No hay alumnos registrados todavía'); return; }
 
-  const grupos = [...profesores]
-    .sort((a,b) => a.nombre.localeCompare(b.nombre))
-    .map(p => ({ nombre: p.nombre, alumnos: alumnos.filter(a => a.profesor_id === p.id) }));
-  const sinAsignar = alumnos.filter(a => !a.profesor_id);
-  if(sinAsignar.length) grupos.push({ nombre: 'Sin profesor asignado', alumnos: sinAsignar });
+  const alumnosConEstado = alumnos.map(a => ({
+    ...a,
+    rutinaOk: !!a.rutinaFecha && !estaVencida(a.rutinaFecha, 30),
+    medicionOk: !!a.medicionFecha && !estaVencida(a.medicionFecha, 60),
+    entrevistaOk: !!a.entrevista_audio_url
+  }));
+
+  const statsPorProfesor = profesores
+    .map(p => {
+      const suyos = alumnosConEstado.filter(a => a.profesor_id === p.id);
+      const n = suyos.length;
+      const rutinaOkN = suyos.filter(a => a.rutinaOk).length;
+      const medicionOkN = suyos.filter(a => a.medicionOk).length;
+      const entrevistaOkN = suyos.filter(a => a.entrevistaOk).length;
+      return {
+        profesor: p,
+        alumnos: suyos,
+        n,
+        pctRutina: n ? rutinaOkN / n * 100 : null,
+        pctMedicion: n ? medicionOkN / n * 100 : null,
+        pctEntrevista: n ? entrevistaOkN / n * 100 : null,
+        pctTotal: n ? (rutinaOkN + medicionOkN + entrevistaOkN) / (n * 3) * 100 : null
+      };
+    })
+    .filter(s => s.n > 0)
+    .sort((a, b) => a.pctTotal - b.pctTotal);
+
+  const sinAsignar = alumnosConEstado.filter(a => !a.profesor_id);
 
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
-  doc.setFontSize(18);
-  doc.text('UltraCarga', 14, 18);
-  doc.setFontSize(13);
-  doc.text('Estado de protocolos por alumno', 14, 28);
-  doc.setFontSize(10);
-  doc.text(`Generado el ${formatDateShort(todayStr())} · Rutina: vence a 30 días · Medición: vence a 2 meses`, 14, 35);
+  const pageW = 210, marginX = 14, contentW = pageW - marginX * 2;
 
-  let y = 46;
-  grupos.forEach(g => {
-    if(!g.alumnos.length) return;
-    if(y > 265){ doc.addPage(); y = 20; }
-    doc.setFontSize(12);
+  function encabezadoBanda(subtitulo){
+    doc.setFillColor(26, 29, 28);
+    doc.rect(0, 0, pageW, 26, 'F');
+    doc.setFillColor(255, 199, 44);
+    doc.rect(0, 0, 4, 26, 'F');
+    doc.setTextColor(255, 199, 44);
     doc.setFont(undefined, 'bold');
-    doc.text(`${g.nombre} (${g.alumnos.length})`, 14, y);
+    doc.setFontSize(19);
+    doc.text('STC app', marginX, 14);
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(10.5);
+    doc.setFont(undefined, 'normal');
+    doc.text(subtitulo, marginX, 21);
+    doc.setTextColor(26, 29, 28);
+  }
+
+  function tituloSeccion(texto, y){
+    doc.setFontSize(12.5);
+    doc.setFont(undefined, 'bold');
+    doc.text(texto, marginX, y);
     doc.setFont(undefined, 'normal');
     y += 3;
-    doc.setLineWidth(0.2);
-    doc.line(14, y, 196, y);
-    y += 8;
+    doc.setFillColor(255, 199, 44);
+    doc.rect(marginX, y, 18, 1, 'F');
+    return y + 8;
+  }
 
-    [...g.alumnos].sort((a,b) => a.nombre.localeCompare(b.nombre)).forEach(a => {
+  encabezadoBanda('Estado de protocolos por profesor');
+  doc.setFontSize(9);
+  doc.setTextColor(110, 110, 110);
+  doc.text(`Generado el ${formatDateShort(todayStr())}  ·  Rutina vence a 30 días  ·  Medición vence a 2 meses  ·  Entrevista no vence`, marginX, 33);
+  doc.setTextColor(26, 29, 28);
+
+  let y = 44;
+
+  if(statsPorProfesor.length){
+    y = tituloSeccion('Resumen: % de protocolos al día por profesor', y);
+
+    const itemsResumen = statsPorProfesor.map(s => ({
+      label: `${s.profesor.nombre} (${s.n})`,
+      value: s.pctTotal,
+      color: pctColorProtocolo(s.pctTotal)
+    }));
+    const graficoResumen = await crearGraficoBarrasPDF(itemsResumen);
+    const imgW = contentW;
+    const imgH = imgW / graficoResumen.aspect;
+    if(y + imgH > 280){ doc.addPage(); y = 20; }
+    doc.addImage(graficoResumen.dataUrl, 'PNG', marginX, y, imgW, imgH);
+    y += imgH + 6;
+
+    doc.setFontSize(8.5);
+    doc.setTextColor(90, 90, 90);
+    doc.text('Verde: 80% o más al día   ·   Naranja: entre 50% y 79%   ·   Rojo: menos de 50%', marginX, y);
+    doc.setTextColor(26, 29, 28);
+    y += 12;
+  }
+
+  for(const s of statsPorProfesor){
+    if(y > 245){ doc.addPage(); y = 20; }
+    y = tituloSeccion(`${s.profesor.nombre} (${s.n})`, y);
+
+    const miniGrafico = await crearGraficoBarrasPDF([
+      { label: 'Rutina vigente', value: s.pctRutina, color: pctColorProtocolo(s.pctRutina) },
+      { label: 'Medición vigente', value: s.pctMedicion, color: pctColorProtocolo(s.pctMedicion) },
+      { label: 'Entrevista hecha', value: s.pctEntrevista, color: pctColorProtocolo(s.pctEntrevista) }
+    ]);
+    const imgW = contentW * 0.78;
+    const imgH = imgW / miniGrafico.aspect;
+    if(y + imgH > 280){ doc.addPage(); y = 20; }
+    doc.addImage(miniGrafico.dataUrl, 'PNG', marginX, y, imgW, imgH);
+    y += imgH + 8;
+
+    [...s.alumnos].sort((a, b) => a.nombre.localeCompare(b.nombre)).forEach(a => {
       if(y > 275){ doc.addPage(); y = 20; }
-      doc.setFontSize(10.5);
-      doc.setFont(undefined, 'bold');
-      doc.text(a.nombre, 14, y);
-      doc.setFont(undefined, 'normal');
-      y += 5.5;
-
-      doc.setFontSize(9);
-      const rutinaVencida = estaVencida(a.rutinaFecha, 30);
-      const rutinaTxt = a.rutinaFecha ? `Rutina: ${formatDateShort(a.rutinaFecha)}${rutinaVencida ? ' (VENCIDA)' : ''}` : 'Rutina: sin rutina activa';
-      const medicionVencida = estaVencida(a.medicionFecha, 60);
-      const medicionTxt = a.medicionFecha ? `Medición: ${formatDateShort(a.medicionFecha)}${medicionVencida ? ' (VENCIDA)' : ''}` : 'Medición: sin mediciones';
-      const entrevistaTxt = a.entrevista_audio_url ? `Entrevista: ${a.entrevista_fecha ? formatDateShort(a.entrevista_fecha) : 'realizada'}` : 'Entrevista: NO realizada';
-      doc.text(`   ${rutinaTxt}   ·   ${medicionTxt}   ·   ${entrevistaTxt}`, 14, y);
-      y += 7;
+      y = lineaAlumnoPDF(doc, a, marginX, y);
     });
     y += 5;
-  });
+  }
+
+  if(sinAsignar.length){
+    if(y > 250){ doc.addPage(); y = 20; }
+    y = tituloSeccion(`Sin profesor asignado (${sinAsignar.length})`, y);
+
+    [...sinAsignar].sort((a, b) => a.nombre.localeCompare(b.nombre)).forEach(a => {
+      if(y > 275){ doc.addPage(); y = 20; }
+      y = lineaAlumnoPDF(doc, a, marginX, y);
+    });
+  }
 
   doc.save(`Estado_protocolos_${todayStr()}.pdf`);
 }
@@ -2079,7 +2255,7 @@ function initIOSInstallBanner(){
       <div class="ios-install-row">
         <div class="ios-install-icon">${ICONS.share}</div>
         <div>
-          <div class="ios-install-title">Instalá UltraCarga en tu iPhone</div>
+          <div class="ios-install-title">Instalá STC app en tu iPhone</div>
           <div>Tocá <b>Compartir</b> abajo en Safari y elegí <b>"Añadir a pantalla de inicio"</b>. Así la abrís como una app, sin el navegador.</div>
         </div>
       </div>
