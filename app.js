@@ -956,7 +956,7 @@ function renderNuevaSesionForm(){
     ${ejerciciosSugeridos.length ? `
       <div class="sub" style="margin-bottom:8px;">Ejercicios de ${escapeHtml(activeSesionDia)} (toca para agregarlo):</div>
       <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px;">
-        ${ejerciciosSugeridos.map(ex => `<button type="button" class="btn-sm" onclick="agregarBloqueEjercicio('${escapeHtml(ex.nombre).replace(/'/g,"\\'")}')">${escapeHtml(ex.nombre)}</button>`).join('')}
+        ${ejerciciosSugeridos.map(ex => `<button type="button" class="btn-sm" onclick="agregarBloqueEjercicio('${escapeHtml(ex.nombre).replace(/'/g,"\\'")}')">${escapeHtml(ex.nombre)}${ex.peso_objetivo ? ` <span class="pill" style="padding:2px 8px; font-size:10px;">${escapeHtml(ex.peso_objetivo)}</span>` : ''}</button>`).join('')}
       </div>
     ` : ''}
 
@@ -1010,7 +1010,10 @@ function agregarBloqueEjercicio(nombreForzado){
     return;
   }
 
-  activeSesionExs.push({ nombre, sets: [] });
+  // Se agrega al INICIO (no al final) para que el ejercicio recién
+  // seleccionado quede arriba de todo, sin tener que scrollear hacia
+  // abajo pasando los ejercicios que ya se agregaron antes hoy.
+  activeSesionExs.unshift({ nombre, sets: [] });
   renderDraftExercises();
 }
 
