@@ -1019,16 +1019,30 @@ async function actualizarFechaSesion(){
   if(!val) return;
 
   const { data: choque } = await sb.from('sesiones')
-    .select('id')
+    .select('id, dia_nombre, nota_alumno, nota_coach, foto_url, sesion_series(id)')
     .eq('alumno_id', profile.id)
     .eq('fecha', val)
-    .neq('id', activeSesionId)
-    .limit(1);
+    .neq('id', activeSesionId);
 
-  if(choque && choque.length){
+  // Una sesión "fantasma" es una que quedó abierta (se creó al tocar "Nueva
+  // sesión") pero se abandonó sin registrar nada — sin series, sin nota, sin
+  // foto. No tiene ningún dato real adentro, así que no debería bloquear la
+  // fecha para siempre: la limpiamos sola y dejamos seguir. Si tiene aunque
+  // sea un dato real, ahí sí es un entrenamiento guardado de verdad y bloqueamos.
+  const candidatos = choque || [];
+  const reales = candidatos.filter(s =>
+    (s.sesion_series && s.sesion_series.length) || s.dia_nombre || s.nota_alumno || s.nota_coach || s.foto_url
+  );
+  const fantasmas = candidatos.filter(s => !reales.includes(s));
+
+  if(reales.length){
     showToast('Ya hay un entrenamiento guardado en esa fecha — cancela esta sesión y entra a ese día para seguir sumando ahí.');
     input.value = activeSesionFecha;
     return;
+  }
+
+  if(fantasmas.length){
+    await sb.from('sesiones').delete().in('id', fantasmas.map(f => f.id));
   }
 
   activeSesionFecha = val;
