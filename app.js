@@ -1646,76 +1646,105 @@ function renderListaAlumnosProfesor(holderId, profesor, alumnosDelProfesor){
   `;
 }
 
-// ---------- Gráficos de barras para el PDF de protocolos ----------
-// Se dibujan a mano en un canvas (no con Chart.js) porque necesitamos la
-// imagen ya lista para meterla en el PDF, sin depender de animaciones.
-// Rojo/naranja/verde son los mismos colores que ya usa el resto de la app
-// para "vencida"/"al día" — el amarillo institucional se reserva para la
-// marca (encabezado, líneas de sección), no para los datos.
+// ---------- Panel de protocolos en PDF (inspirado en la planilla "PROTOCOLOS [MES]"
+// que ya usa STC: profesores en columnas, cada protocolo con su fila de "cuántos
+// al día" y su fila de "% al día", más una columna de totales a la derecha —
+// pero con los colores institucionales STC en vez de la planilla original. ----------
+// Umbral: 90% o más = verde (al día). 85-89% = amarillo (atención). Menos de 85% =
+// rojo (bajo el mínimo que activa revisión, igual que en la planilla de Google Sheets).
 function pctColorProtocolo(pct){
   if(pct === null || pct === undefined) return '#9CA39A';
-  if(pct >= 80) return '#4CAF6D';
-  if(pct >= 50) return '#E8672E';
+  if(pct >= 90) return '#4CAF6D';
+  if(pct >= 85) return '#FFC72C';
   return '#E5484D';
 }
 
-function dibujarBarraRedondeada(ctx, x, y, w, h, r){
-  const rad = Math.max(0, Math.min(r, h / 2, Math.abs(w) / 2));
-  ctx.beginPath();
-  if(w <= 0){ return; }
-  ctx.moveTo(x + rad, y);
-  ctx.arcTo(x + w, y, x + w, y + h, rad);
-  ctx.arcTo(x + w, y + h, x, y + h, rad);
-  ctx.arcTo(x, y + h, x, y, rad);
-  ctx.arcTo(x, y, x + w, y, rad);
-  ctx.closePath();
+function hexToRgb(hex){
+  const n = parseInt(hex.replace('#', ''), 16);
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
 }
 
-async function crearGraficoBarrasPDF(items){
-  // items: [{ label, value: 0-100, color? }]
-  try{ await document.fonts.load('700 20px Oswald'); }catch(e){}
-  const scale = 3;
-  const width = 980, leftPad = 260, rightPad = 90, barH = 30, gap = 16, topPad = 6;
-  const height = topPad * 2 + items.length * (barH + gap);
-  const canvas = document.createElement('canvas');
-  canvas.width = width * scale;
-  canvas.height = height * scale;
-  const ctx = canvas.getContext('2d');
-  ctx.scale(scale, scale);
-  ctx.textBaseline = 'middle';
+// Tarjeta con un número grande (vector, no imagen — nítida en cualquier zoom/impresión).
+function dibujarTarjetaStat(doc, x, y, w, h, label, pct, ok, total, unidadTxt){
+  const rgb = hexToRgb(pctColorProtocolo(pct));
+  const cx = x + w / 2;
 
-  items.forEach((it, i) => {
-    const y = topPad + i * (barH + gap);
-    const trackX = leftPad, trackW = width - leftPad - rightPad;
+  doc.setDrawColor(210, 210, 205);
+  doc.setLineWidth(0.3);
+  doc.roundedRect(x, y, w, h, 2, 2, 'S');
+  doc.setFillColor(rgb.r, rgb.g, rgb.b);
+  doc.rect(x, y, w, 1.3, 'F');
 
-    ctx.fillStyle = '#1A1D1C';
-    ctx.font = '600 19px Oswald, sans-serif';
-    ctx.textAlign = 'left';
-    let label = it.label;
-    while(ctx.measureText(label).width > leftPad - 14 && label.length > 3){
-      label = label.slice(0, -2) + '…';
+  doc.setTextColor(rgb.r, rgb.g, rgb.b);
+  doc.setFont(undefined, 'bold');
+  doc.setFontSize(18);
+  const pctTxt = (pct === null || pct === undefined) ? 's/d' : `${Math.round(pct)}%`;
+  doc.text(pctTxt, cx, y + 12.5, { align: 'center' });
+
+  doc.setTextColor(26, 29, 28);
+  doc.setFont(undefined, 'bold');
+  doc.setFontSize(8.5);
+  doc.text(label, cx, y + 19, { align: 'center' });
+
+  doc.setFont(undefined, 'normal');
+  doc.setFontSize(7.2);
+  doc.setTextColor(120, 120, 120);
+  const countTxt = (!total) ? 'sin alumnos' : `${ok}/${total} ${unidadTxt || 'alumnos al día'}`;
+  doc.text(countTxt, cx, y + 24, { align: 'center' });
+  doc.setTextColor(26, 29, 28);
+}
+
+// Fila de grilla genérica: primera columna = etiqueta, columnas del medio = un
+// valor por profesor, última columna = total general (con su propio color de fondo).
+function filaGrid(doc, x, y, colWidths, celdas, opts){
+  opts = opts || {};
+  const rowH = opts.rowH || 7;
+
+  let cx = x;
+  colWidths.forEach((w, i) => {
+    const isLast = i === colWidths.length - 1;
+    const bg = (isLast && opts.totalColBg) ? opts.totalColBg : opts.bgColor;
+    if(bg){
+      const rgb = hexToRgb(bg);
+      doc.setFillColor(rgb.r, rgb.g, rgb.b);
+      doc.rect(cx, y, w, rowH, 'F');
     }
-    ctx.fillText(label, 0, y + barH / 2);
-
-    ctx.fillStyle = '#E9E9E4';
-    dibujarBarraRedondeada(ctx, trackX, y, trackW, barH, 6);
-    ctx.fill();
-
-    if(it.value !== null && it.value !== undefined){
-      const w = trackW * Math.max(0, Math.min(100, it.value)) / 100;
-      ctx.fillStyle = it.color || '#FFC72C';
-      dibujarBarraRedondeada(ctx, trackX, y, w, barH, 6);
-      ctx.fill();
-    }
-
-    ctx.fillStyle = '#1A1D1C';
-    ctx.font = '700 19px Oswald, sans-serif';
-    ctx.textAlign = 'left';
-    const txt = (it.value === null || it.value === undefined) ? 's/d' : `${Math.round(it.value)}%`;
-    ctx.fillText(txt, trackX + trackW + 12, y + barH / 2);
+    cx += w;
   });
 
-  return { dataUrl: canvas.toDataURL('image/png'), aspect: width / height };
+  cx = x;
+  colWidths.forEach((w, i) => {
+    const val = celdas[i] || {};
+    const fontSize = val.fontSize || 7.2;
+    doc.setFont(undefined, val.bold ? 'bold' : 'normal');
+    doc.setFontSize(fontSize);
+    const rgb = hexToRgb(val.color || opts.textColor || '#1A1D1C');
+    doc.setTextColor(rgb.r, rgb.g, rgb.b);
+    const align = val.align || (i === 0 ? 'left' : 'center');
+    let text = val.text != null ? String(val.text) : '';
+    while(doc.getTextWidth(text) > w - 2.5 && text.length > 1){
+      text = text.slice(0, -2) + '…';
+    }
+    const tx = align === 'left' ? cx + 2 : cx + w / 2;
+    doc.text(text, tx, y + rowH / 2 + 1, { align });
+    cx += w;
+  });
+
+  doc.setTextColor(26, 29, 28);
+  doc.setFont(undefined, 'normal');
+  return y + rowH;
+}
+
+// Barra amarilla de sección (ej. "RUTINA — vigente a 30 días"), ancho completo de la grilla.
+function barraSeccion(doc, x, y, wTotal, texto){
+  doc.setFillColor(255, 199, 44);
+  doc.rect(x, y, wTotal, 6.5, 'F');
+  doc.setTextColor(26, 29, 28);
+  doc.setFont(undefined, 'bold');
+  doc.setFontSize(8);
+  doc.text(texto, x + 3, y + 4.5);
+  doc.setFont(undefined, 'normal');
+  return y + 6.5;
 }
 
 // Línea de detalle de un alumno (rutina / medición / entrevista) — devuelve el nuevo y.
@@ -1734,12 +1763,11 @@ function lineaAlumnoPDF(doc, a, x, y){
   return y + 7;
 }
 
-// PDF de estado de protocolos: además del detalle por alumno (como antes), ahora
-// suma por profesor el % de protocolos al día — un total y uno por protocolo — con
-// un gráfico de barras, para poder auditar de un vistazo a quién le falta ponerse
-// al día. "Al día" = rutina vigente (≤30 días) + medición vigente (≤60 días) +
-// entrevista realizada alguna vez (no vence). Ordenado de menor a mayor % total,
-// para que el profesor que más necesita atención aparezca primero.
+// PDF de estado de protocolos — panel general (profesores en columnas, como la
+// planilla "PROTOCOLOS [MES]" de STC) + detalle alumno por alumno debajo.
+// "Al día" = rutina vigente (≤30 días) + medición vigente (≤60 días) + entrevista
+// realizada alguna vez (no vence). Columnas ordenadas de menor a mayor % general,
+// para que el profesor que más necesita atención aparezca primero (a la izquierda).
 async function descargarPDFEstadoProtocolos(profesores, alumnos){
   if(!alumnos || !alumnos.length){ showToast('No hay alumnos registrados todavía'); return; }
 
@@ -1761,106 +1789,175 @@ async function descargarPDFEstadoProtocolos(profesores, alumnos){
         profesor: p,
         alumnos: suyos,
         n,
+        rutinaOkN, medicionOkN, entrevistaOkN,
         pctRutina: n ? rutinaOkN / n * 100 : null,
         pctMedicion: n ? medicionOkN / n * 100 : null,
         pctEntrevista: n ? entrevistaOkN / n * 100 : null,
         pctTotal: n ? (rutinaOkN + medicionOkN + entrevistaOkN) / (n * 3) * 100 : null
       };
     })
-    .filter(s => s.n > 0)
-    .sort((a, b) => a.pctTotal - b.pctTotal);
+    .sort((a, b) => {
+      if(a.pctTotal === null && b.pctTotal === null) return a.profesor.nombre.localeCompare(b.profesor.nombre);
+      if(a.pctTotal === null) return 1;
+      if(b.pctTotal === null) return -1;
+      return a.pctTotal - b.pctTotal;
+    });
 
   const sinAsignar = alumnosConEstado.filter(a => !a.profesor_id);
 
+  const universoTotal = statsPorProfesor.reduce((acc, s) => acc + s.n, 0);
+  const granRutinaOk = statsPorProfesor.reduce((acc, s) => acc + s.rutinaOkN, 0);
+  const granMedicionOk = statsPorProfesor.reduce((acc, s) => acc + s.medicionOkN, 0);
+  const granEntrevistaOk = statsPorProfesor.reduce((acc, s) => acc + s.entrevistaOkN, 0);
+  const pctGranRutina = universoTotal ? granRutinaOk / universoTotal * 100 : null;
+  const pctGranMedicion = universoTotal ? granMedicionOk / universoTotal * 100 : null;
+  const pctGranEntrevista = universoTotal ? granEntrevistaOk / universoTotal * 100 : null;
+  const pctGranTotal = universoTotal ? (granRutinaOk + granMedicionOk + granEntrevistaOk) / (universoTotal * 3) * 100 : null;
+
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-  const pageW = 210, marginX = 14, contentW = pageW - marginX * 2;
+  const doc = new jsPDF({ orientation: 'landscape' });
+  const pageW = 297, pageH = 210, marginX = 12, contentW = pageW - marginX * 2;
 
   function encabezadoBanda(subtitulo){
     doc.setFillColor(26, 29, 28);
-    doc.rect(0, 0, pageW, 26, 'F');
+    doc.rect(0, 0, pageW, 24, 'F');
     doc.setFillColor(255, 199, 44);
-    doc.rect(0, 0, 4, 26, 'F');
+    doc.rect(0, 0, 4, 24, 'F');
     doc.setTextColor(255, 199, 44);
     doc.setFont(undefined, 'bold');
-    doc.setFontSize(19);
-    doc.text('STC app', marginX, 14);
+    doc.setFontSize(18);
+    doc.text('STC app', marginX, 13);
     doc.setTextColor(255, 255, 255);
-    doc.setFontSize(10.5);
+    doc.setFontSize(10);
     doc.setFont(undefined, 'normal');
-    doc.text(subtitulo, marginX, 21);
+    doc.text(subtitulo, marginX, 19.5);
     doc.setTextColor(26, 29, 28);
   }
 
   function tituloSeccion(texto, y){
-    doc.setFontSize(12.5);
+    doc.setFontSize(12);
     doc.setFont(undefined, 'bold');
     doc.text(texto, marginX, y);
     doc.setFont(undefined, 'normal');
     y += 3;
     doc.setFillColor(255, 199, 44);
     doc.rect(marginX, y, 18, 1, 'F');
-    return y + 8;
+    return y + 7;
   }
 
-  encabezadoBanda('Estado de protocolos por profesor');
-  doc.setFontSize(9);
+  encabezadoBanda('Estado de protocolos — panel general');
+  doc.setFontSize(8.3);
   doc.setTextColor(110, 110, 110);
-  doc.text(`Generado el ${formatDateShort(todayStr())}  ·  Rutina vence a 30 días  ·  Medición vence a 2 meses  ·  Entrevista no vence`, marginX, 33);
+  doc.text(`Generado el ${formatDateShort(todayStr())}  ·  Rutina vence a 30 días  ·  Medición vence a 2 meses  ·  Entrevista no vence  ·  Verde 90% o más  ·  Amarillo 85-89%  ·  Rojo bajo 85%`, marginX, 30);
   doc.setTextColor(26, 29, 28);
 
-  let y = 44;
+  let y = 38;
 
+  // ---- estado general: universo + 4 tarjetas ----
+  y = tituloSeccion('Estado general de protocolos', y);
+  doc.setFontSize(9);
+  doc.setTextColor(90, 90, 90);
+  let universoTxt = `Universo: ${universoTotal} alumno${universoTotal === 1 ? '' : 's'} con profesor asignado`;
+  if(sinAsignar.length) universoTxt += `  ·  ${sinAsignar.length} sin profesor asignado (no incluido en este cálculo)`;
+  doc.text(universoTxt, marginX, y);
+  doc.setTextColor(26, 29, 28);
+  y += 6;
+
+  const cardGap = 4;
+  const cardW = (contentW - cardGap * 3) / 4;
+  const cardH = 26;
+  dibujarTarjetaStat(doc, marginX, y, cardW, cardH, 'Rutina vigente', pctGranRutina, granRutinaOk, universoTotal);
+  dibujarTarjetaStat(doc, marginX + (cardW + cardGap), y, cardW, cardH, 'Medición vigente', pctGranMedicion, granMedicionOk, universoTotal);
+  dibujarTarjetaStat(doc, marginX + (cardW + cardGap) * 2, y, cardW, cardH, 'Entrevista hecha', pctGranEntrevista, granEntrevistaOk, universoTotal);
+  dibujarTarjetaStat(doc, marginX + (cardW + cardGap) * 3, y, cardW, cardH, 'TOTAL GENERAL', pctGranTotal, granRutinaOk + granMedicionOk + granEntrevistaOk, universoTotal * 3, 'protocolos al día (de 3 c/u)');
+  y += cardH + 10;
+
+  // ---- panel por profesor: profesores en columnas, cada protocolo con su bloque ----
   if(statsPorProfesor.length){
-    y = tituloSeccion('Resumen: % de protocolos al día por profesor', y);
+    y = tituloSeccion('Detalle por profesor', y);
 
-    const itemsResumen = statsPorProfesor.map(s => ({
-      label: `${s.profesor.nombre} (${s.n})`,
-      value: s.pctTotal,
-      color: pctColorProtocolo(s.pctTotal)
-    }));
-    const graficoResumen = await crearGraficoBarrasPDF(itemsResumen);
-    const imgW = contentW;
-    const imgH = imgW / graficoResumen.aspect;
-    if(y + imgH > 280){ doc.addPage(); y = 20; }
-    doc.addImage(graficoResumen.dataUrl, 'PNG', marginX, y, imgW, imgH);
-    y += imgH + 6;
+    const labelW = 40, totalW = 24;
+    const nCoaches = statsPorProfesor.length;
+    const coachW = (contentW - labelW - totalW) / nCoaches;
+    const colWidths = [labelW, ...statsPorProfesor.map(() => coachW), totalW];
+    const wTotalGrid = colWidths.reduce((a, w) => a + w, 0);
+    const primerNombre = (nombre) => (nombre || '').trim().split(/\s+/)[0].toUpperCase();
 
-    doc.setFontSize(8.5);
-    doc.setTextColor(90, 90, 90);
-    doc.text('Verde: 80% o más al día   ·   Naranja: entre 50% y 79%   ·   Rojo: menos de 50%', marginX, y);
+    y = filaGrid(doc, marginX, y, colWidths, [
+      { text: 'PROFESOR', align: 'left', bold: true },
+      ...statsPorProfesor.map(s => ({ text: primerNombre(s.profesor.nombre), bold: true })),
+      { text: 'TOTAL', bold: true }
+    ], { rowH: 8, bgColor: '#1A1D1C', textColor: '#FFC72C' });
+
+    y = filaGrid(doc, marginX, y, colWidths, [
+      { text: 'Alumnos', align: 'left', bold: true },
+      ...statsPorProfesor.map(s => ({ text: String(s.n) })),
+      { text: String(universoTotal), bold: true }
+    ], { rowH: 7, bgColor: '#F5F4F0', totalColBg: '#FFE9A8' });
+
+    y = filaGrid(doc, marginX, y, colWidths, [
+      { text: '% General', align: 'left', bold: true },
+      ...statsPorProfesor.map(s => ({ text: s.pctTotal === null ? 's/d' : `${Math.round(s.pctTotal)}%`, color: pctColorProtocolo(s.pctTotal), bold: true })),
+      { text: pctGranTotal === null ? 's/d' : `${Math.round(pctGranTotal)}%`, color: pctColorProtocolo(pctGranTotal), bold: true }
+    ], { rowH: 7.5, bgColor: '#FBF3D9', totalColBg: '#FFE9A8' });
+    doc.setDrawColor(220, 220, 214);
+    doc.line(marginX, y, marginX + wTotalGrid, y);
+    y += 3;
+
+    const bloques = [
+      { titulo: 'RUTINA — vigente a 30 días', okKey: 'rutinaOkN', pctKey: 'pctRutina', granOk: granRutinaOk, pctGran: pctGranRutina },
+      { titulo: 'MEDICIÓN — vigente a 2 meses', okKey: 'medicionOkN', pctKey: 'pctMedicion', granOk: granMedicionOk, pctGran: pctGranMedicion },
+      { titulo: 'ENTREVISTA — no vence', okKey: 'entrevistaOkN', pctKey: 'pctEntrevista', granOk: granEntrevistaOk, pctGran: pctGranEntrevista }
+    ];
+
+    bloques.forEach(b => {
+      if(y + 25 > pageH - 12){ doc.addPage(); y = 16; }
+      y = barraSeccion(doc, marginX, y, wTotalGrid, b.titulo);
+
+      y = filaGrid(doc, marginX, y, colWidths, [
+        { text: 'Alumnos al día', align: 'left' },
+        ...statsPorProfesor.map(s => ({ text: s.n ? `${s[b.okKey]}/${s.n}` : 's/d' })),
+        { text: `${b.granOk}/${universoTotal}`, bold: true }
+      ], { rowH: 7, bgColor: '#FFFFFF', totalColBg: '#FFF3CE' });
+
+      y = filaGrid(doc, marginX, y, colWidths, [
+        { text: '% al día', align: 'left', bold: true },
+        ...statsPorProfesor.map(s => ({ text: s[b.pctKey] === null ? 's/d' : `${Math.round(s[b.pctKey])}%`, color: pctColorProtocolo(s[b.pctKey]), bold: true })),
+        { text: b.pctGran === null ? 's/d' : `${Math.round(b.pctGran)}%`, color: pctColorProtocolo(b.pctGran), bold: true }
+      ], { rowH: 7.5, bgColor: '#FBF3D9', totalColBg: '#FFE9A8' });
+
+      doc.setDrawColor(220, 220, 214);
+      doc.line(marginX, y, marginX + wTotalGrid, y);
+      y += 3;
+    });
+
+    y += 2;
+    doc.setFontSize(7.5);
+    doc.setTextColor(150, 105, 15);
+    doc.text('Nota: todo % general bajo 85% queda marcado en rojo y activa revisión del protocolo con el profesor a cargo.', marginX, y);
     doc.setTextColor(26, 29, 28);
-    y += 12;
+    y += 10;
   }
 
-  for(const s of statsPorProfesor){
-    if(y > 245){ doc.addPage(); y = 20; }
-    y = tituloSeccion(`${s.profesor.nombre} (${s.n})`, y);
-
-    const miniGrafico = await crearGraficoBarrasPDF([
-      { label: 'Rutina vigente', value: s.pctRutina, color: pctColorProtocolo(s.pctRutina) },
-      { label: 'Medición vigente', value: s.pctMedicion, color: pctColorProtocolo(s.pctMedicion) },
-      { label: 'Entrevista hecha', value: s.pctEntrevista, color: pctColorProtocolo(s.pctEntrevista) }
-    ]);
-    const imgW = contentW * 0.78;
-    const imgH = imgW / miniGrafico.aspect;
-    if(y + imgH > 280){ doc.addPage(); y = 20; }
-    doc.addImage(miniGrafico.dataUrl, 'PNG', marginX, y, imgW, imgH);
-    y += imgH + 8;
+  // ---- detalle alumno por alumno, por profesor ----
+  const conAlumnos = statsPorProfesor.filter(s => s.n > 0);
+  for(const s of conAlumnos){
+    if(y > pageH - 55){ doc.addPage(); y = 16; }
+    y = tituloSeccion(`${s.profesor.nombre} (${s.n} alumno${s.n === 1 ? '' : 's'})`, y);
 
     [...s.alumnos].sort((a, b) => a.nombre.localeCompare(b.nombre)).forEach(a => {
-      if(y > 275){ doc.addPage(); y = 20; }
+      if(y > pageH - 20){ doc.addPage(); y = 16; }
       y = lineaAlumnoPDF(doc, a, marginX, y);
     });
     y += 5;
   }
 
   if(sinAsignar.length){
-    if(y > 250){ doc.addPage(); y = 20; }
+    if(y > pageH - 40){ doc.addPage(); y = 16; }
     y = tituloSeccion(`Sin profesor asignado (${sinAsignar.length})`, y);
 
     [...sinAsignar].sort((a, b) => a.nombre.localeCompare(b.nombre)).forEach(a => {
-      if(y > 275){ doc.addPage(); y = 20; }
+      if(y > pageH - 20){ doc.addPage(); y = 16; }
       y = lineaAlumnoPDF(doc, a, marginX, y);
     });
   }
