@@ -38,7 +38,8 @@ const ICONS = {
   message: `<svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>`,
   share: `<svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"></path><polyline points="16 6 12 2 8 6"></polyline><line x1="12" y1="2" x2="12" y2="15"></line></svg>`,
   search: `<svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>`,
-  mic: `<svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`
+  mic: `<svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`,
+  edit: `<svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>`
 };
 // Markup del lado derecho de un botón-toggle: texto según estado + flecha que rota.
 function toggleStateHtml(closedTxt){
@@ -1993,11 +1994,17 @@ async function renderCoachAlumnoDetail(alumnoId){
   // Modo observador: un profesor que no es el asignado a este alumno puede entrar a mirar
   // (por ejemplo si el profe titular faltó), pero no puede crear, editar ni eliminar nada.
   const soloObservador = profile.role === 'profesor' && alumno.profesor_id !== profile.id;
+  const esSuperAdmin = profile.role === 'super_admin';
 
   root().innerHTML = `
     <div class="header-actions">
-      <div>
-        <h1 style="font-size:20px;">${escapeHtml(alumno.nombre)}</h1>
+      <div style="flex:1; min-width:0;">
+        <div id="alumno-nombre-holder">
+          <h1 style="font-size:20px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <span id="alumno-nombre-texto">${escapeHtml(alumno.nombre)}</span>
+            ${esSuperAdmin ? `<button class="btn-sm" id="btn-editar-nombre-alumno" style="font-size:11px; padding:3px 8px;">${ICONS.edit} Editar nombre</button>` : ''}
+          </h1>
+        </div>
         <div class="sub" style="margin-bottom:0;">Registro de entrenamiento</div>
       </div>
       <button class="switch-user" id="btn-volver">${ICONS.arrowLeft} Volver</button>
@@ -2079,6 +2086,37 @@ async function renderCoachAlumnoDetail(alumnoId){
     ` : ''}
   `;
   document.getElementById('btn-volver').onclick = renderCoachHome;
+  if(esSuperAdmin){
+    const btnEditarNombre = document.getElementById('btn-editar-nombre-alumno');
+    if(btnEditarNombre){
+      btnEditarNombre.onclick = () => {
+        document.getElementById('alumno-nombre-holder').innerHTML = `
+          <div class="row-flex" style="gap:8px; align-items:center; flex-wrap:wrap;">
+            <input type="text" id="input-editar-nombre-alumno" value="${escapeHtml(alumno.nombre)}" style="margin-bottom:0; flex:1; min-width:160px;">
+            <button class="btn-sm" id="btn-guardar-nombre-alumno">Guardar</button>
+            <button class="btn-sm" id="btn-cancelar-nombre-alumno">Cancelar</button>
+          </div>
+        `;
+        const input = document.getElementById('input-editar-nombre-alumno');
+        input.focus();
+        input.select();
+        document.getElementById('btn-cancelar-nombre-alumno').onclick = () => renderCoachAlumnoDetail(alumnoId);
+        const guardarNombreAlumno = async () => {
+          const nuevoNombre = input.value.trim();
+          if(!nuevoNombre){ showToast('El nombre no puede quedar vacío'); return; }
+          if(nuevoNombre === alumno.nombre){ renderCoachAlumnoDetail(alumnoId); return; }
+          const btnGuardar = document.getElementById('btn-guardar-nombre-alumno');
+          btnGuardar.disabled = true; btnGuardar.textContent = 'Guardando...';
+          const { error } = await sb.from('profiles').update({ nombre: nuevoNombre }).eq('id', alumnoId);
+          if(error){ showToast('No se pudo actualizar el nombre: ' + error.message); btnGuardar.disabled = false; btnGuardar.textContent = 'Guardar'; return; }
+          showToast('Nombre actualizado');
+          renderCoachAlumnoDetail(alumnoId);
+        };
+        document.getElementById('btn-guardar-nombre-alumno').onclick = guardarNombreAlumno;
+        input.onkeydown = (e) => { if(e.key === 'Enter') guardarNombreAlumno(); };
+      };
+    }
+  }
   const btnNuevaRutina = document.getElementById('btn-nueva-rutina');
   if(btnNuevaRutina) btnNuevaRutina.onclick = () => renderRutinaEditor(alumno);
   if(rutina){
