@@ -726,6 +726,77 @@ async function eliminarMedicion(id, alumnoId, holderId){
 }
 
 // ---------- ENTREVISTA INICIAL (audio, solo profe/super admin — no aparece en la vista del alumno) ----------
+let entrevistaMediaRecorder = null;
+let entrevistaRecStream = null;
+let entrevistaRecStart = null;
+let entrevistaRecInterval = null;
+
+function formatMSS(segs){
+  const m = Math.floor(segs/60), s = segs%60;
+  return `${m}:${String(s).padStart(2,'0')}`;
+}
+
+async function iniciarGrabacionEntrevista(){
+  const btn = document.getElementById('btn-grabar-entrevista');
+  const estado = document.getElementById('entrevista-rec-estado');
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined'){
+    showToast('Este navegador no permite grabar audio — usa "Sube el audio" con una nota de voz.');
+    return;
+  }
+  try{
+    entrevistaRecStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  }catch(e){
+    showToast('No se pudo acceder al micrófono — revisa los permisos del navegador.');
+    return;
+  }
+  const chunks = [];
+  const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
+  entrevistaMediaRecorder = mimeType ? new MediaRecorder(entrevistaRecStream, { mimeType }) : new MediaRecorder(entrevistaRecStream);
+  entrevistaMediaRecorder.ondataavailable = (e) => { if(e.data && e.data.size > 0) chunks.push(e.data); };
+  entrevistaMediaRecorder.onstop = () => {
+    entrevistaRecStream.getTracks().forEach(t => t.stop());
+    entrevistaRecStream = null;
+    const blob = new Blob(chunks, { type: entrevistaMediaRecorder.mimeType || 'audio/webm' });
+    const ext = (blob.type.split('/')[1] || 'webm').split(';')[0];
+    const file = new File([blob], `entrevista-${Date.now()}.${ext}`, { type: blob.type });
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    const input = document.getElementById('input-audio-entrevista');
+    if(input){
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change'));
+    }
+    entrevistaMediaRecorder = null;
+  };
+  entrevistaRecStart = Date.now();
+  entrevistaMediaRecorder.start();
+  if(btn){ btn.textContent = '⏹ Detener grabación'; btn.classList.add('btn-danger-confirm'); }
+  entrevistaRecInterval = setInterval(() => {
+    if(estado) estado.textContent = `🔴 Grabando… ${formatMSS(Math.floor((Date.now() - entrevistaRecStart)/1000))}`;
+  }, 500);
+}
+
+function detenerGrabacionEntrevista(){
+  if(entrevistaRecInterval){ clearInterval(entrevistaRecInterval); entrevistaRecInterval = null; }
+  const btn = document.getElementById('btn-grabar-entrevista');
+  const estado = document.getElementById('entrevista-rec-estado');
+  if(btn){ btn.textContent = `${ICONS.mic} Grabar audio aquí`; btn.classList.remove('btn-danger-confirm'); }
+  if(estado) estado.textContent = '';
+  if(entrevistaMediaRecorder && entrevistaMediaRecorder.state !== 'inactive'){
+    entrevistaMediaRecorder.stop();
+  }
+}
+
+// A partir de la URL pública guardada, reconstruye el path interno del
+// archivo dentro del bucket — necesario para poder borrarlo de verdad.
+function extraerPathStorage(publicUrl, bucket){
+  if(!publicUrl) return null;
+  const marker = `/public/${bucket}/`;
+  const idx = publicUrl.indexOf(marker);
+  if(idx === -1) return null;
+  return decodeURIComponent(publicUrl.slice(idx + marker.length));
+}
+
 async function renderEntrevista(holderId, alumnoId, audioUrl, fecha, soloLectura){
   const holder = document.getElementById(holderId);
 
@@ -749,6 +820,13 @@ async function renderEntrevista(holderId, alumnoId, audioUrl, fecha, soloLectura
     <div class="card">
       <label>Fecha de la entrevista</label>
       <input type="date" id="input-fecha-entrevista" value="${todayStr()}" max="${todayStr()}">
+
+      <div class="row-flex" style="margin-bottom:10px;">
+        <button type="button" class="btn-sm" id="btn-grabar-entrevista">${ICONS.mic} Grabar audio aquí</button>
+        <span class="sub" id="entrevista-rec-estado" style="margin-bottom:0;"></span>
+      </div>
+
+      <div class="sub" style="margin-top:0;">o, si ya tienes el audio grabado (nota de voz, etc.):</div>
       <label class="photo-input-label" for="input-audio-entrevista">
         <span id="entrevista-audio-label-text">${ICONS.mic} Sube el audio de la entrevista</span>
         <input type="file" id="input-audio-entrevista" accept="audio/*">
@@ -761,7 +839,7 @@ async function renderEntrevista(holderId, alumnoId, audioUrl, fecha, soloLectura
     const btnDel = document.getElementById('btn-eliminar-entrevista');
     btnDel.onclick = () => {
       if(btnDel.dataset.confirm === '1'){
-        eliminarEntrevista(alumnoId, holderId);
+        eliminarEntrevista(alumnoId, holderId, audioUrl);
       } else {
         btnDel.dataset.confirm = '1';
         btnDel.textContent = '¿Seguro? Toca de nuevo para eliminar';
@@ -780,6 +858,13 @@ async function renderEntrevista(holderId, alumnoId, audioUrl, fecha, soloLectura
       document.getElementById('entrevista-audio-label-text').innerHTML = f ? `${ICONS.check} ${escapeHtml(f.name)}` : `${ICONS.mic} Sube el audio de la entrevista`;
     };
     document.getElementById('btn-guardar-entrevista').onclick = () => guardarEntrevista(alumnoId, holderId);
+    document.getElementById('btn-grabar-entrevista').onclick = () => {
+      if(entrevistaMediaRecorder && entrevistaMediaRecorder.state === 'recording'){
+        detenerGrabacionEntrevista();
+      } else {
+        iniciarGrabacionEntrevista();
+      }
+    };
   }
 }
 
@@ -789,8 +874,8 @@ async function guardarEntrevista(alumnoId, holderId){
   const audioInput = document.getElementById('input-audio-entrevista');
   const file = audioInput.files[0];
   if(!file){ showToast('Selecciona el archivo de audio'); return; }
-  const MAX_BYTES = 20 * 1024 * 1024; // ~20MB — de sobra para una nota de voz de 1 min ya comprimida (celular/WhatsApp)
-  if(file.size > MAX_BYTES){ showToast('El audio es muy pesado (máx. 20MB). Usa la nota de voz del celular o de WhatsApp, que ya vienen comprimidas.'); return; }
+  const MAX_BYTES = 60 * 1024 * 1024; // ~60MB — cubre una entrevista larga grabada en vivo (~2h de audio comprimido) o una nota de voz subida a mano
+  if(file.size > MAX_BYTES){ showToast('El audio es muy pesado (máx. 60MB).'); return; }
 
   btn.disabled = true; btn.textContent = 'Guardando...';
   try{
@@ -809,9 +894,24 @@ async function guardarEntrevista(alumnoId, holderId){
   }
 }
 
-async function eliminarEntrevista(alumnoId, holderId){
+async function eliminarEntrevista(alumnoId, holderId, audioUrl){
+  // Primero se limpia la referencia en el perfil del alumno — así la ficha
+  // nunca queda apuntando a un audio roto, pase lo que pase con el paso
+  // siguiente. Borrar el archivo del storage es un segundo paso, aparte:
+  // si por algo falla, el archivo queda huérfano (ocupa espacio) pero no
+  // rompe nada visible en la app.
   const { error } = await sb.from('profiles').update({ entrevista_audio_url: null, entrevista_fecha: null }).eq('id', alumnoId);
   if(error){ showToast('No se pudo eliminar la entrevista'); return; }
+
+  const path = extraerPathStorage(audioUrl, 'entrevistas');
+  if(path){
+    try{
+      await sb.storage.from('entrevistas').remove([path]);
+    }catch(e){
+      console.warn('No se pudo borrar el audio del storage (queda huérfano, sin afectar la app):', e);
+    }
+  }
+
   showToast('Entrevista eliminada');
   renderEntrevista(holderId, alumnoId, null, null);
 }
@@ -2187,7 +2287,13 @@ async function renderCoachAlumnoDetail(alumnoId){
       <button class="btn-sm btn-eliminar-sesion" id="btn-eliminar-alumno" style="margin-top:16px; width:100%; justify-content:center;">Eliminar alumno</button>
     ` : ''}
   `;
-  document.getElementById('btn-volver').onclick = renderCoachHome;
+  document.getElementById('btn-volver').onclick = () => {
+    // Si se navega hacia atrás en medio de una grabación de entrevista sin
+    // haber tocado "Detener", igual la cortamos acá — para no dejar el
+    // micrófono grabando de fondo sin que el profe se dé cuenta.
+    detenerGrabacionEntrevista();
+    renderCoachHome();
+  };
   if(esSuperAdmin){
     const btnEditarNombre = document.getElementById('btn-editar-nombre-alumno');
     if(btnEditarNombre){
