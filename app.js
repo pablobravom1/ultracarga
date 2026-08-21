@@ -807,7 +807,7 @@ async function renderOpinionForm(holderId, alumnoId){
     : `<div class="empty">Todavía no has enviado ningún mensaje.</div>`;
   holder.innerHTML = `
     <div class="card" style="margin-bottom:16px;">
-      <div class="sub" style="margin-bottom:12px;">Este mensaje lo lee directamente Pablo — tu profesor no lo ve. Úsalo para contarle cómo va el servicio, la infraestructura, o cualquier sugerencia.</div>
+      <div class="sub" style="margin-bottom:12px;">Este mensaje lo lee directamente la jefatura de STC — tu profesor no lo ve. Úsalo para contarle cómo va el servicio, la infraestructura, o cualquier sugerencia.</div>
       <label>Tu mensaje</label>
       <textarea id="input-opinion" placeholder="Escribe aquí..." rows="4"></textarea>
       <button class="btn" id="btn-enviar-opinion">${ICONS.message} Enviar</button>
@@ -1756,7 +1756,7 @@ function barraSeccion(doc, x, y, wTotal, texto){
   return y + 6.5;
 }
 
-// Línea de detalle de un alumno (rutina / medición / entrevista) — devuelve el nuevo y.
+// Línea de detalle de un alumno (macrociclo / medición / entrevista) — devuelve el nuevo y.
 function lineaAlumnoPDF(doc, a, x, y){
   doc.setFontSize(10.5);
   doc.setFont(undefined, 'bold');
@@ -1765,7 +1765,7 @@ function lineaAlumnoPDF(doc, a, x, y){
   y += 5.5;
 
   doc.setFontSize(9);
-  const rutinaTxt = a.rutinaFecha ? `Rutina: ${formatDateShort(a.rutinaFecha)}${a.rutinaOk ? '' : ' (VENCIDA)'}` : 'Rutina: sin rutina activa';
+  const rutinaTxt = a.rutinaFecha ? `Macrociclo: ${formatDateShort(a.rutinaFecha)}${a.rutinaOk ? '' : ' (VENCIDA)'}` : 'Macrociclo: sin macrociclo activo';
   const medicionTxt = a.medicionFecha ? `Medición: ${formatDateShort(a.medicionFecha)}${a.medicionOk ? '' : ' (VENCIDA)'}` : 'Medición: sin mediciones';
   const entrevistaTxt = a.entrevistaOk ? `Entrevista: ${a.entrevista_fecha ? formatDateShort(a.entrevista_fecha) : 'realizada'}` : 'Entrevista: NO realizada';
   doc.text(`   ${rutinaTxt}   ·   ${medicionTxt}   ·   ${entrevistaTxt}`, x, y);
@@ -1857,7 +1857,7 @@ async function descargarPDFEstadoProtocolos(profesores, alumnos){
   encabezadoBanda('Estado de protocolos — panel general');
   doc.setFontSize(8.3);
   doc.setTextColor(110, 110, 110);
-  doc.text(`Generado el ${formatDateShort(todayStr())}  ·  Rutina vence a 30 días  ·  Medición vence a 2 meses  ·  Entrevista no vence  ·  Verde 90% o más  ·  Amarillo 85-89%  ·  Rojo bajo 85%`, marginX, 30);
+  doc.text(`Generado el ${formatDateShort(todayStr())}  ·  Macrociclo vence a 30 días  ·  Medición vence a 2 meses  ·  Entrevista no vence  ·  Verde 90% o más  ·  Amarillo 85-89%  ·  Rojo bajo 85%`, marginX, 30);
   doc.setTextColor(26, 29, 28);
 
   let y = 38;
@@ -1875,7 +1875,7 @@ async function descargarPDFEstadoProtocolos(profesores, alumnos){
   const cardGap = 4;
   const cardW = (contentW - cardGap * 3) / 4;
   const cardH = 26;
-  dibujarTarjetaStat(doc, marginX, y, cardW, cardH, 'Rutina vigente', pctGranRutina, granRutinaOk, universoTotal);
+  dibujarTarjetaStat(doc, marginX, y, cardW, cardH, 'Macrociclo vigente', pctGranRutina, granRutinaOk, universoTotal);
   dibujarTarjetaStat(doc, marginX + (cardW + cardGap), y, cardW, cardH, 'Medición vigente', pctGranMedicion, granMedicionOk, universoTotal);
   dibujarTarjetaStat(doc, marginX + (cardW + cardGap) * 2, y, cardW, cardH, 'Entrevista hecha', pctGranEntrevista, granEntrevistaOk, universoTotal);
   dibujarTarjetaStat(doc, marginX + (cardW + cardGap) * 3, y, cardW, cardH, 'TOTAL GENERAL', pctGranTotal, granRutinaOk + granMedicionOk + granEntrevistaOk, universoTotal * 3, 'protocolos al día (de 3 c/u)');
@@ -1914,7 +1914,7 @@ async function descargarPDFEstadoProtocolos(profesores, alumnos){
     y += 3;
 
     const bloques = [
-      { titulo: 'RUTINA — vigente a 30 días', okKey: 'rutinaOkN', pctKey: 'pctRutina', granOk: granRutinaOk, pctGran: pctGranRutina },
+      { titulo: 'MACROCICLO — vigente a 30 días', okKey: 'rutinaOkN', pctKey: 'pctRutina', granOk: granRutinaOk, pctGran: pctGranRutina },
       { titulo: 'MEDICIÓN — vigente a 2 meses', okKey: 'medicionOkN', pctKey: 'pctMedicion', granOk: granMedicionOk, pctGran: pctGranMedicion },
       { titulo: 'ENTREVISTA — no vence', okKey: 'entrevistaOkN', pctKey: 'pctEntrevista', granOk: granEntrevistaOk, pctGran: pctGranEntrevista }
     ];
