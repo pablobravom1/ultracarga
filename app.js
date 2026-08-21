@@ -1466,14 +1466,18 @@ async function renderCoachHome(){
         <div id="coach-alumnos-list"></div>
       </div>
     ` : `
+      <div class="row-flex" style="margin-bottom:10px; align-items:center;">
+        <div class="sub" style="margin-bottom:0;" id="alumnos-scope-label">Tus alumnos</div>
+        ${conUltima.length ? `<button class="btn-sm" id="btn-toggle-scope">${ICONS.users} Ver todos los alumnos</button>` : ''}
+      </div>
       ${conUltima.length ? `
         <div style="position:relative; margin-bottom:14px;">
           <span style="position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--chalk-dim); display:flex;">${ICONS.search}</span>
           <input type="text" id="input-buscar-alumno" placeholder="Buscar alumno por nombre..." style="padding-left:36px; margin-bottom:0;" autocomplete="off">
         </div>
       ` : ''}
-      <div class="card" style="font-size:12.5px; color:var(--chalk-dim); margin-bottom:14px;">
-        Puedes ver el perfil de cualquier alumno, aunque no sea tuyo, por si necesitas cubrir a otro profe — pero solo puedes editar o eliminar cosas en los alumnos asignados a ti.
+      <div class="card hidden" id="alumnos-scope-note" style="font-size:12.5px; color:var(--chalk-dim); margin-bottom:14px;">
+        Estás viendo a todos los alumnos del gimnasio, no solo los tuyos — puedes ver el perfil de cualquiera, por si necesitas cubrir a otro profe, pero solo puedes editar o eliminar cosas en los alumnos asignados a ti.
       </div>
       <div id="coach-alumnos-list"></div>
     `}
@@ -1486,24 +1490,60 @@ async function renderCoachHome(){
     });
     wireToggle('btn-toggle-buzon', 'buzon-holder', () => renderBuzonOpiniones('buzon-holder'));
     wireToggle('btn-toggle-alumnos', 'alumnos-holder');
-  }
 
-  const inputBuscar = document.getElementById('input-buscar-alumno');
-  if(inputBuscar){
-    inputBuscar.oninput = () => {
-      const q = normalizarTexto(inputBuscar.value.trim());
-      const filtrados = q ? conUltima.filter(a => normalizarTexto(a.nombre).includes(q)) : conUltima;
-      renderListaAlumnos(filtrados, esSuperAdmin, profesores, nombreProfesor, conUltima.length, q);
+    const inputBuscar = document.getElementById('input-buscar-alumno');
+    if(inputBuscar){
+      inputBuscar.oninput = () => {
+        const q = normalizarTexto(inputBuscar.value.trim());
+        const filtrados = q ? conUltima.filter(a => normalizarTexto(a.nombre).includes(q)) : conUltima;
+        renderListaAlumnos(filtrados, esSuperAdmin, profesores, nombreProfesor, conUltima.length, q);
+      };
+    }
+
+    renderListaAlumnos(conUltima, esSuperAdmin, profesores, nombreProfesor, conUltima.length, '');
+  } else {
+    // Por defecto el profesor solo ve a sus propios alumnos; con el botón puede
+    // pasar a ver a todos (modo observador) — el buscador filtra dentro de esa vista.
+    const misAlumnos = conUltima.filter(a => a.profesor_id === profile.id);
+    let mostrarTodos = false;
+
+    const btnToggleScope = document.getElementById('btn-toggle-scope');
+    const notaScope = document.getElementById('alumnos-scope-note');
+    const scopeLabel = document.getElementById('alumnos-scope-label');
+    const inputBuscar = document.getElementById('input-buscar-alumno');
+
+    const refrescarLista = () => {
+      const base = mostrarTodos ? conUltima : misAlumnos;
+      const q = inputBuscar ? normalizarTexto(inputBuscar.value.trim()) : '';
+      const filtrados = q ? base.filter(a => normalizarTexto(a.nombre).includes(q)) : base;
+      const emptyMsg = (!mostrarTodos && !misAlumnos.length && conUltima.length)
+        ? 'Todavía no tienes alumnos asignados.<br>Pídele al super admin que te asigne alumnos, o toca "Ver todos los alumnos" para ver el resto.'
+        : null;
+      renderListaAlumnos(filtrados, esSuperAdmin, profesores, nombreProfesor, base.length, q, emptyMsg);
     };
-  }
 
-  renderListaAlumnos(conUltima, esSuperAdmin, profesores, nombreProfesor, conUltima.length, '');
+    if(btnToggleScope){
+      btnToggleScope.onclick = () => {
+        mostrarTodos = !mostrarTodos;
+        btnToggleScope.innerHTML = `${ICONS.users} ${mostrarTodos ? 'Ver solo mis alumnos' : 'Ver todos los alumnos'}`;
+        scopeLabel.textContent = mostrarTodos ? 'Todos los alumnos' : 'Tus alumnos';
+        if(notaScope) notaScope.classList.toggle('hidden', !mostrarTodos);
+        if(inputBuscar) inputBuscar.value = '';
+        refrescarLista();
+      };
+    }
+    if(inputBuscar){
+      inputBuscar.oninput = refrescarLista;
+    }
+
+    refrescarLista();
+  }
 }
 
-function renderListaAlumnos(lista, esSuperAdmin, profesores, nombreProfesor, totalSinFiltrar, query){
+function renderListaAlumnos(lista, esSuperAdmin, profesores, nombreProfesor, totalSinFiltrar, query, emptyMsgHtml){
   const listEl = document.getElementById('coach-alumnos-list');
   if(!totalSinFiltrar){
-    listEl.innerHTML = `<div class="empty">Aún no hay alumnos registrados.<br>Cuando alguien cree su cuenta, va a aparecer aquí.</div>`;
+    listEl.innerHTML = `<div class="empty">${emptyMsgHtml || 'Aún no hay alumnos registrados.<br>Cuando alguien cree su cuenta, va a aparecer aquí.'}</div>`;
     return;
   }
   if(!lista.length){
