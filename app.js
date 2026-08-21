@@ -11,6 +11,8 @@ let activeSesionFecha = null; // fecha elegida para la sesión activa (permite c
 let activeSesionExs = [];    // sets ya guardados de la sesión activa, agrupados por ejercicio
 let activeRutinaDias = [];   // días (con sus ejercicios) de la rutina activa del alumno logueado
 let activeSesionDia = null;  // día del programa que el alumno eligió entrenar en la sesión activa
+let activeStatsPorEjercicio = {}; // nombre ejercicio (minúsculas) -> {max, last} — para sugerir peso y detectar PR al instante
+let activeEjerciciosSugeridos = []; // ejercicios del día elegido, para poder re-renderizar los botones de sugerencia
 let rutinaEditorDias = [];   // bloques de día del editor de rutina (coach)
 let rutinaEditorId = null;   // si se está editando una rutina existente en vez de crear una nueva
 let progresoChart = null;
@@ -152,6 +154,26 @@ function markPRs(sesiones){
     });
   });
   return sesiones;
+}
+
+// Calcula, por ejercicio, el peso máximo histórico (para detectar un récord
+// personal al instante) y el último peso registrado (para sugerir un peso
+// al agregar ese ejercicio de nuevo) — mismo criterio cronológico que markPRs.
+function computeStatsPorEjercicio(sesiones){
+  const ordenadas = [...sesiones].sort((a,b)=> new Date(a.fecha) - new Date(b.fecha) || new Date(a.created_at) - new Date(b.created_at));
+  const stats = {};
+  ordenadas.forEach(s => {
+    const series = (s.sesion_series || []).slice().sort((a,b)=> (a.orden||0)-(b.orden||0));
+    series.forEach(set => {
+      const key = set.ejercicio_nombre.trim().toLowerCase();
+      const peso = Number(set.peso) || 0;
+      if(peso <= 0) return;
+      if(!stats[key]) stats[key] = { max: 0, last: 0 };
+      if(peso > stats[key].max) stats[key].max = peso;
+      stats[key].last = peso;
+    });
+  });
+  return stats;
 }
 
 function groupSets(series){
@@ -316,6 +338,7 @@ async function renderAlumnoHome(){
   const fechas = conSeries.map(s => s.fecha);
   const streak = computeStreak(fechas);
   activeRutinaDias = (rutina && rutina.rutina_ejercicios) ? groupPorDia(rutina.rutina_ejercicios) : [];
+  activeStatsPorEjercicio = computeStatsPorEjercicio(sesiones || []);
   const hayEntrenamientoHoy = (sesiones || []).some(s => s.fecha === todayStr());
 
   root().innerHTML = `
@@ -930,6 +953,7 @@ async function iniciarNuevaSesion(rutina){
 function renderNuevaSesionForm(){
   const diaSeleccionadoObj = activeRutinaDias.find(d => d.nombre === activeSesionDia);
   const ejerciciosSugeridos = diaSeleccionadoObj ? diaSeleccionadoObj.ejercicios : [];
+  activeEjerciciosSugeridos = ejerciciosSugeridos;
 
   root().innerHTML = `
     <div class="row-flex">
@@ -955,8 +979,8 @@ function renderNuevaSesionForm(){
 
     ${ejerciciosSugeridos.length ? `
       <div class="sub" style="margin-bottom:8px;">Ejercicios de ${escapeHtml(activeSesionDia)} (toca para agregarlo):</div>
-      <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px;">
-        ${ejerciciosSugeridos.map(ex => `<button type="button" class="btn-sm" onclick="agregarBloqueEjercicio('${escapeHtml(ex.nombre).replace(/'/g,"\\'")}')">${escapeHtml(ex.nombre)}${ex.peso_objetivo ? ` <span class="pill" style="padding:2px 8px; font-size:10px;">${escapeHtml(ex.peso_objetivo)}</span>` : ''}</button>`).join('')}
+      <div id="sugeridos-holder" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px;">
+        ${renderSugeridosButtonsHtml(ejerciciosSugeridos)}
       </div>
     ` : ''}
 
@@ -996,6 +1020,21 @@ function renderNuevaSesionForm(){
   renderDraftExercises();
 }
 
+// Botones de "ejercicios de tu rutina": muestran el peso objetivo (si lo
+// cargó el coach) y se marcan como agregados apenas el ejercicio ya está
+// en el entrenamiento de hoy, para saber de un vistazo qué falta.
+function renderSugeridosButtonsHtml(lista){
+  return (lista || []).map(ex => {
+    const yaAgregado = activeSesionExs.some(g => g.nombre.toLowerCase() === ex.nombre.trim().toLowerCase());
+    const pesoPill = ex.peso_objetivo ? ` <span class="pill" style="padding:2px 8px; font-size:10px;">${escapeHtml(ex.peso_objetivo)}</span>` : '';
+    return `<button type="button" class="btn-sm${yaAgregado ? ' added' : ''}" onclick="agregarBloqueEjercicio('${escapeHtml(ex.nombre).replace(/'/g,"\\'")}')">${yaAgregado ? '✓ ' : ''}${escapeHtml(ex.nombre)}${pesoPill}</button>`;
+  }).join('');
+}
+function actualizarSugeridosHolder(){
+  const holder = document.getElementById('sugeridos-holder');
+  if(holder) holder.innerHTML = renderSugeridosButtonsHtml(activeEjerciciosSugeridos);
+}
+
 // Crea (o enfoca) un bloque de ejercicio dentro del entrenamiento de hoy.
 // nombreForzado se usa cuando viene de un botón de sugerencia; si no, toma el input de texto.
 function agregarBloqueEjercicio(nombreForzado){
@@ -1010,11 +1049,17 @@ function agregarBloqueEjercicio(nombreForzado){
     return;
   }
 
+  // Peso sugerido = el último peso real que registró en este ejercicio,
+  // para no tener que escribirlo de cero cada vez (se puede ajustar igual).
+  const stat = activeStatsPorEjercicio[nombre.toLowerCase()];
+  const pesoSugerido = stat && stat.last ? stat.last : null;
+
   // Se agrega al INICIO (no al final) para que el ejercicio recién
   // seleccionado quede arriba de todo, sin tener que scrollear hacia
   // abajo pasando los ejercicios que ya se agregaron antes hoy.
-  activeSesionExs.unshift({ nombre, sets: [] });
+  activeSesionExs.unshift({ nombre, sets: [], pesoSugerido });
   renderDraftExercises();
+  actualizarSugeridosHolder();
 }
 
 async function actualizarFechaSesion(){
@@ -1065,8 +1110,9 @@ async function seleccionarDiaSesion(nombre){
 
 function renderSetLine(s, i, idx){
   const nota = s.nota ? `<span class="pill" style="padding:2px 8px; font-size:10.5px;">${escapeHtml(s.nota)}</span>` : '';
+  const pr = s._isPR ? '<span class="pill pr">🔥 PR</span>' : '';
   const btnBorrar = (idx != null && s.id) ? `<button type="button" class="remove-x" style="height:22px; width:22px; font-size:10px; flex-shrink:0;" onclick="eliminarSetIndividual(${idx}, '${s.id}')" title="Quitar esta serie">✕</button>` : '';
-  return `<div class="set-line"><span>S${i+1}: <b>${s.reps}</b> × <b>${s.peso}kg</b>${nota ? ` ${nota}` : ''}</span>${btnBorrar}</div>`;
+  return `<div class="set-line"><span>S${i+1}: <b>${s.reps}</b> × <b>${s.peso}kg</b>${nota ? ` ${nota}` : ''}${pr ? ` ${pr}` : ''}</span>${btnBorrar}</div>`;
 }
 
 async function eliminarSetIndividual(idx, setId){
@@ -1108,6 +1154,18 @@ async function agregarSetABloque(idx){
 
   if(error){ showToast('No se pudo guardar la serie, intenta de nuevo'); return; }
 
+  // Detecta un récord personal al instante, con el mismo criterio que se
+  // usa para marcar los PR en el historial (peso > máximo previo de ese
+  // ejercicio). Actualiza también el "último peso" para la próxima sugerencia.
+  const key = grupo.nombre.trim().toLowerCase();
+  const pesoNum = Number(data.peso) || 0;
+  if(!activeStatsPorEjercicio[key]) activeStatsPorEjercicio[key] = { max: 0, last: 0 };
+  const stat = activeStatsPorEjercicio[key];
+  const esPR = pesoNum > 0 && pesoNum > stat.max;
+  if(pesoNum > stat.max) stat.max = pesoNum;
+  if(pesoNum > 0) stat.last = pesoNum;
+  data._isPR = esPR;
+
   grupo.sets.push(data);
   const setsHolder = document.getElementById(`bloque-sets-${idx}`);
   if(setsHolder){
@@ -1116,7 +1174,7 @@ async function agregarSetABloque(idx){
   if(pesoEl) pesoEl.value = '';
   if(repsEl){ repsEl.value = ''; repsEl.focus(); }
   if(notaEl) notaEl.value = '';
-  showToast('Serie guardada ✓');
+  showToast(esPR ? `🔥 ¡Nuevo récord en ${grupo.nombre}!` : 'Serie guardada ✓');
 }
 
 function quitarBloqueEjercicio(idx, btn){
@@ -1144,6 +1202,7 @@ async function eliminarBloqueEjercicio(idx){
   }
   activeSesionExs.splice(idx, 1);
   renderDraftExercises();
+  actualizarSugeridosHolder();
   showToast('Ejercicio quitado');
 }
 
@@ -1161,7 +1220,7 @@ function renderDraftExercises(){
       </div>
       <div class="set-input-row" style="margin-top:8px;">
         <div><input type="number" id="input-reps-${idx}" placeholder="Reps" style="margin-bottom:0;"></div>
-        <div><input type="number" id="input-peso-${idx}" placeholder="Peso kg" style="margin-bottom:0;"></div>
+        <div><input type="number" id="input-peso-${idx}" placeholder="Peso kg" value="${ex.pesoSugerido != null ? ex.pesoSugerido : ''}" style="margin-bottom:0;"></div>
         <div><button type="button" class="btn-sm" id="btn-serie-${idx}" style="width:100%;" onclick="agregarSetABloque(${idx})">+ Serie</button></div>
       </div>
       <input type="text" id="input-nota-${idx}" placeholder="Nota de esta serie (opcional): drop set, rest-pause, al fallo..." style="margin-top:8px; margin-bottom:0;">
