@@ -880,6 +880,7 @@ let entrevistaMediaRecorder = null;
 let entrevistaRecStream = null;
 let entrevistaRecStart = null;
 let entrevistaRecInterval = null;
+let entrevistaRecDurationMs = 0; // duración real medida por nosotros (Chrome no la escribe bien en el archivo webm)
 
 function formatMSS(segs){
   const m = Math.floor(segs/60), s = segs%60;
@@ -907,14 +908,28 @@ async function iniciarGrabacionEntrevista(){
     entrevistaRecStream.getTracks().forEach(t => t.stop());
     entrevistaRecStream = null;
     const blob = new Blob(chunks, { type: entrevistaMediaRecorder.mimeType || 'audio/webm' });
-    const ext = (blob.type.split('/')[1] || 'webm').split(';')[0];
-    const file = new File([blob], `entrevista-${Date.now()}.${ext}`, { type: blob.type });
-    const dt = new DataTransfer();
-    dt.items.add(file);
-    const input = document.getElementById('input-audio-entrevista');
-    if(input){
-      input.files = dt.files;
-      input.dispatchEvent(new Event('change'));
+    const construirArchivoYSubir = (blobFinal) => {
+      const ext = (blobFinal.type.split('/')[1] || 'webm').split(';')[0];
+      const file = new File([blobFinal], `entrevista-${Date.now()}.${ext}`, { type: blobFinal.type });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const input = document.getElementById('input-audio-entrevista');
+      if(input){
+        input.files = dt.files;
+        input.dispatchEvent(new Event('change'));
+      }
+    };
+    // Chrome graba el audio bien, pero no escribe la duración real dentro del
+    // archivo .webm (por eso algunos reproductores muestran una duración
+    // absurda tipo "3:10:58" en vez de los segundos reales). Como nosotros sí
+    // sabemos cuánto duró de verdad (entrevistaRecDurationMs), reparamos esa
+    // metadata antes de subir el archivo. Si la librería no cargó por algún
+    // motivo, seguimos igual con el archivo original (se sube el audio igual,
+    // solo que con la duración mostrada mal en algunos reproductores).
+    if(typeof ysFixWebmDuration === 'function' && entrevistaRecDurationMs > 0){
+      ysFixWebmDuration(blob, entrevistaRecDurationMs, (blobArreglado) => construirArchivoYSubir(blobArreglado || blob));
+    } else {
+      construirArchivoYSubir(blob);
     }
     entrevistaMediaRecorder = null;
   };
@@ -933,6 +948,7 @@ function detenerGrabacionEntrevista(){
   if(btn){ btn.textContent = `${ICONS.mic} Grabar audio aquí`; btn.classList.remove('btn-danger-confirm'); }
   if(estado) estado.textContent = '';
   if(entrevistaMediaRecorder && entrevistaMediaRecorder.state !== 'inactive'){
+    entrevistaRecDurationMs = entrevistaRecStart ? (Date.now() - entrevistaRecStart) : 0;
     entrevistaMediaRecorder.stop();
   }
 }
