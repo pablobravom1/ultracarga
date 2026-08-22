@@ -103,18 +103,20 @@ function formatDate(iso){
 // Campos opcionales y aditivos: no reemplazan nada de lo que ya existía (reps/peso/nota).
 const TIPO_SERIE_LABELS = { drop_set: 'Drop set', rest_pause: 'Rest-pause', forzada: 'Forzada al fallo' };
 const LADO_LABELS = { unilateral: 'Unilateral', bilateral: 'Bilateral', peso_por_lado: 'Peso por lado' };
-function selectTipoSerieHtml(id, valorActual){
+function selectTipoSerieHtml(id, valorActual, onchangeExpr){
   const v = valorActual || '';
-  return `<select id="${id}">
+  const onchange = onchangeExpr ? ` onchange="${onchangeExpr.replace(/"/g,'&quot;')}"` : '';
+  return `<select id="${id}"${onchange}>
     <option value=""${v===''?' selected':''}>Tipo de serie (opcional)</option>
     <option value="drop_set"${v==='drop_set'?' selected':''}>Drop set</option>
     <option value="rest_pause"${v==='rest_pause'?' selected':''}>Rest-pause</option>
     <option value="forzada"${v==='forzada'?' selected':''}>Forzada al fallo</option>
   </select>`;
 }
-function selectLadoHtml(id, valorActual){
+function selectLadoHtml(id, valorActual, onchangeExpr){
   const v = valorActual || '';
-  return `<select id="${id}">
+  const onchange = onchangeExpr ? ` onchange="${onchangeExpr.replace(/"/g,'&quot;')}"` : '';
+  return `<select id="${id}"${onchange}>
     <option value=""${v===''?' selected':''}>Lado (opcional)</option>
     <option value="unilateral"${v==='unilateral'?' selected':''}>Unilateral</option>
     <option value="bilateral"${v==='bilateral'?' selected':''}>Bilateral</option>
@@ -230,7 +232,8 @@ function groupPorDia(ejercicios){
 function renderExMeta(ex){
   const sxr = `${ex.series_objetivo || '-'} × ${escapeHtml(ex.reps_objetivo || '-')}`;
   const peso = ex.peso_objetivo ? `<span class="pill" style="padding:2px 8px; font-size:10.5px;">${escapeHtml(ex.peso_objetivo)}</span>` : '';
-  return `<span style="display:flex; align-items:center; gap:6px;"><b>${sxr}</b>${peso}</span>`;
+  const tipoLado = renderTipoLadoPills(ex.tipo_serie_objetivo, ex.lado_objetivo);
+  return `<span style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;"><b>${sxr}</b>${peso}${tipoLado}</span>`;
 }
 function renderExNota(ex){
   return ex.nota ? `<div class="ex-nota">📝 ${escapeHtml(ex.nota)}</div>` : '';
@@ -1587,7 +1590,9 @@ function duplicarRutinaComoNueva(alumno, rutinaVieja){
       reps_objetivo: ex.reps_objetivo || '',
       peso_objetivo: ex.peso_objetivo || '',
       nota: ex.nota || '',
-      descanso_seg: ex.descanso_seg != null ? String(ex.descanso_seg) : ''
+      descanso_seg: ex.descanso_seg != null ? String(ex.descanso_seg) : '',
+      tipo_serie_objetivo: ex.tipo_serie_objetivo || '',
+      lado_objetivo: ex.lado_objetivo || ''
     }))
   }));
   renderRutinaEditor(alumno, { nombre: rutinaVieja.nombre, objetivo: rutinaVieja.objetivo || '', dias });
@@ -2476,7 +2481,7 @@ function renderRutinaEditor(alumno, prefill, editingRutinaId){
   rutinaEditorId = editingRutinaId || null;
   rutinaEditorDias = (prefill && prefill.dias && prefill.dias.length)
     ? prefill.dias.map(d => ({ nombre: d.nombre, ejercicios: d.ejercicios.map(ex => ({...ex})) }))
-    : [{ nombre: 'Día 1', ejercicios: [{ nombre:'', series_objetivo:'', reps_objetivo:'', peso_objetivo:'', nota:'', descanso_seg:'' }] }];
+    : [{ nombre: 'Día 1', ejercicios: [{ nombre:'', series_objetivo:'', reps_objetivo:'', peso_objetivo:'', nota:'', descanso_seg:'', tipo_serie_objetivo:'', lado_objetivo:'' }] }];
 
   const titulo = rutinaEditorId ? 'Editar rutina' : (prefill ? 'Duplicar rutina' : 'Nueva rutina');
   const subtitulo = rutinaEditorId
@@ -2506,7 +2511,7 @@ function renderRutinaEditor(alumno, prefill, editingRutinaId){
   document.getElementById('btn-cancelar-rutina').onclick = () => renderCoachAlumnoDetail(alumno.id);
   document.getElementById('btn-agregar-dia').onclick = () => {
     if(rutinaEditorDias.length >= 5){ showToast('Máximo 5 días por programa'); return; }
-    rutinaEditorDias.push({ nombre: `Día ${rutinaEditorDias.length + 1}`, ejercicios: [{ nombre:'', series_objetivo:'', reps_objetivo:'', peso_objetivo:'', nota:'', descanso_seg:'' }] });
+    rutinaEditorDias.push({ nombre: `Día ${rutinaEditorDias.length + 1}`, ejercicios: [{ nombre:'', series_objetivo:'', reps_objetivo:'', peso_objetivo:'', nota:'', descanso_seg:'', tipo_serie_objetivo:'', lado_objetivo:'' }] });
     renderRutinaDiasEditor();
   };
   document.getElementById('btn-guardar-rutina').onclick = () => guardarRutina(alumno);
@@ -2542,19 +2547,23 @@ function renderRutinaDiasEditor(){
           <label>Nota técnica (opcional)</label>
           <input type="text" placeholder="Ej: última serie al fallo, drop set, rest-pause..." value="${escapeHtml(row.nota)}" oninput="rutinaEditorDias[${d}].ejercicios[${e}].nota=this.value">
         </div>
+        <div class="rutina-ex-tipolado-row">
+          <div>${selectTipoSerieHtml(`rutina-tiposerie-${d}-${e}`, row.tipo_serie_objetivo, `rutinaEditorDias[${d}].ejercicios[${e}].tipo_serie_objetivo=this.value`)}</div>
+          <div>${selectLadoHtml(`rutina-lado-${d}-${e}`, row.lado_objetivo, `rutinaEditorDias[${d}].ejercicios[${e}].lado_objetivo=this.value`)}</div>
+        </div>
       </div>
     `).join('');
   });
 }
 
 function agregarEjercicioADia(d){
-  rutinaEditorDias[d].ejercicios.push({ nombre:'', series_objetivo:'', reps_objetivo:'', peso_objetivo:'', nota:'', descanso_seg:'' });
+  rutinaEditorDias[d].ejercicios.push({ nombre:'', series_objetivo:'', reps_objetivo:'', peso_objetivo:'', nota:'', descanso_seg:'', tipo_serie_objetivo:'', lado_objetivo:'' });
   renderRutinaDiasEditor();
 }
 
 function quitarEjercicioDeDia(d, e){
   rutinaEditorDias[d].ejercicios.splice(e, 1);
-  if(!rutinaEditorDias[d].ejercicios.length) rutinaEditorDias[d].ejercicios.push({ nombre:'', series_objetivo:'', reps_objetivo:'', peso_objetivo:'', nota:'', descanso_seg:'' });
+  if(!rutinaEditorDias[d].ejercicios.length) rutinaEditorDias[d].ejercicios.push({ nombre:'', series_objetivo:'', reps_objetivo:'', peso_objetivo:'', nota:'', descanso_seg:'', tipo_serie_objetivo:'', lado_objetivo:'' });
   renderRutinaDiasEditor();
 }
 
@@ -2578,6 +2587,8 @@ async function guardarRutina(alumno){
         peso_objetivo: (r.peso_objetivo || '').trim() || null,
         nota: (r.nota || '').trim() || null,
         descanso_seg: r.descanso_seg ? Number(r.descanso_seg) : null,
+        tipo_serie_objetivo: (r.tipo_serie_objetivo || '').trim() || null,
+        lado_objetivo: (r.lado_objetivo || '').trim() || null,
         dia_nombre: nombreDia,
         dia_orden: di,
         orden: ei
