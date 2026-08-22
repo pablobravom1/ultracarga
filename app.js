@@ -13,6 +13,9 @@ let activeRutinaDias = [];   // días (con sus ejercicios) de la rutina activa d
 let activeSesionDia = null;  // día del programa que el alumno eligió entrenar en la sesión activa
 let activeStatsPorEjercicio = {}; // nombre ejercicio (minúsculas) -> {max, last} — para sugerir peso y detectar PR al instante
 let activeEjerciciosSugeridos = []; // ejercicios del día elegido, para poder re-renderizar los botones de sugerencia
+let activeSuperseries = []; // [[nombreA, nombreB], ...] — pares de ejercicios "unidos" en la sesión activa de hoy
+let superserieModo = false;    // true mientras se está tocando el 1er/2do ejercicio para unirlos
+let superserieEsperando = null; // nombre del primer ejercicio tocado, mientras se espera el segundo toque
 let rutinaEditorDias = [];   // bloques de día del editor de rutina (coach)
 let rutinaEditorId = null;   // si se está editando una rutina existente en vez de crear una nueva
 let progresoChart = null;
@@ -1065,6 +1068,8 @@ async function iniciarNuevaSesion(rutina){
     activeSesionId = existente.id;
     activeSesionExs = groupSets(existente.sesion_series);
     activeSesionDia = existente.dia_nombre || null;
+    activeSuperseries = Array.isArray(existente.superseries) ? existente.superseries : [];
+    superserieModo = false; superserieEsperando = null;
     renderNuevaSesionForm();
     return;
   }
@@ -1078,6 +1083,8 @@ async function iniciarNuevaSesion(rutina){
   activeSesionId = data.id;
   activeSesionExs = [];
   activeSesionDia = null;
+  activeSuperseries = [];
+  superserieModo = false; superserieEsperando = null;
   renderNuevaSesionForm();
 }
 
@@ -1135,7 +1142,10 @@ function renderNuevaSesionForm(){
       <div class="sub" style="margin-top:0;">Toca esto recién cuando termines <b>todos</b> los ejercicios de hoy:</div>
       <button class="btn" id="btn-finalizar-sesion">${ICONS.check} Finalizar entrenamiento de hoy</button>
     </div>
+
+    <button type="button" id="btn-superserie-toggle" class="fab-superserie${superserieModo ? ' active' : ''}" title="Unir dos ejercicios en superserie">${ICONS.link}</button>
   `;
+  document.getElementById('btn-superserie-toggle').onclick = toggleSuperserieModo;
   document.getElementById('btn-cancelar-sesion').onclick = cancelarSesion;
   document.getElementById('input-fecha-sesion').onchange = actualizarFechaSesion;
   if(activeRutinaDias.length){
@@ -1341,20 +1351,97 @@ async function eliminarBloqueEjercicio(idx){
     if(error){ showToast('No se pudo quitar el ejercicio'); return; }
   }
   activeSesionExs.splice(idx, 1);
+  // Si este ejercicio estaba unido en una superserie, esa unión ya no tiene
+  // sentido — se quita también para no dejar una etiqueta "Unido con..." apuntando a algo que ya no está.
+  const nEliminado = normEx(grupo.nombre);
+  const teniaSuperserie = activeSuperseries.some(p => normEx(p[0]) === nEliminado || normEx(p[1]) === nEliminado);
+  if(teniaSuperserie){
+    activeSuperseries = activeSuperseries.filter(p => normEx(p[0]) !== nEliminado && normEx(p[1]) !== nEliminado);
+    await guardarSuperseries();
+  }
   renderDraftExercises();
   actualizarSugeridosHolder();
   showToast('Ejercicio quitado');
 }
 
+// ---------- SUPERSERIE (unir dos ejercicios del entrenamiento de hoy) ----------
+// Aditivo: no reemplaza nada de lo existente. Se guarda en sesiones.superseries
+// como una lista de pares [nombreA, nombreB]; solo se muestra el nombre de
+// ambos ejercicios unidos, tal como se pidió (simple, sin más detalle).
+function normEx(nombre){ return (nombre || '').trim().toLowerCase(); }
+function buscarSuperserieDe(nombre){
+  const n = normEx(nombre);
+  return activeSuperseries.find(p => normEx(p[0]) === n || normEx(p[1]) === n) || null;
+}
+function otroDeSuperserie(par, nombre){
+  const n = normEx(nombre);
+  return normEx(par[0]) === n ? par[1] : par[0];
+}
+async function guardarSuperseries(){
+  if(!activeSesionId) return;
+  await sb.from('sesiones').update({ superseries: activeSuperseries }).eq('id', activeSesionId);
+}
+function toggleSuperserieModo(){
+  superserieModo = !superserieModo;
+  superserieEsperando = null;
+  const btn = document.getElementById('btn-superserie-toggle');
+  if(btn) btn.classList.toggle('active', superserieModo);
+  showToast(superserieModo ? 'Toca dos ejercicios para unirlos en superserie' : 'Modo superserie desactivado');
+  renderDraftExercises();
+}
+async function tocarEjercicioParaSuperserie(idx){
+  const grupo = activeSesionExs[idx];
+  if(!grupo) return;
+  if(buscarSuperserieDe(grupo.nombre)){
+    showToast('Ese ejercicio ya está unido a otro — desúnelo primero si quieres cambiarlo');
+    return;
+  }
+  if(!superserieEsperando){
+    superserieEsperando = grupo.nombre;
+    renderDraftExercises();
+    return;
+  }
+  if(normEx(superserieEsperando) === normEx(grupo.nombre)){
+    superserieEsperando = null;
+    renderDraftExercises();
+    return;
+  }
+  activeSuperseries.push([superserieEsperando, grupo.nombre]);
+  superserieEsperando = null;
+  superserieModo = false;
+  const btnFab = document.getElementById('btn-superserie-toggle');
+  if(btnFab) btnFab.classList.remove('active');
+  await guardarSuperseries();
+  renderDraftExercises();
+  showToast('Ejercicios unidos en superserie ✓');
+}
+async function quitarSuperserie(nombre){
+  const n = normEx(nombre);
+  activeSuperseries = activeSuperseries.filter(p => normEx(p[0]) !== n && normEx(p[1]) !== n);
+  await guardarSuperseries();
+  renderDraftExercises();
+  showToast('Superserie deshecha');
+}
+
 function renderDraftExercises(){
   const el = document.getElementById('draft-exercises');
   if(!activeSesionExs.length){ el.innerHTML = ''; return; }
-  el.innerHTML = activeSesionExs.map((ex, idx) => `
+  el.innerHTML = activeSesionExs.map((ex, idx) => {
+    const parSuperserie = buscarSuperserieDe(ex.nombre);
+    const esEsperando = superserieModo && superserieEsperando && normEx(superserieEsperando) === normEx(ex.nombre);
+    const superserieLabelHtml = parSuperserie
+      ? `<div class="superserie-label">${ICONS.link} Unido con <b>${escapeHtml(otroDeSuperserie(parSuperserie, ex.nombre))}</b> (superserie) <button type="button" class="link-btn" onclick="quitarSuperserie('${escapeHtml(ex.nombre).replace(/'/g,"\\'")}')">Desunir</button></div>`
+      : '';
+    const nombreHtml = (superserieModo && !parSuperserie)
+      ? `<span class="ex-name ex-name-seleccionable${esEsperando ? ' seleccionando' : ''}" onclick="tocarEjercicioParaSuperserie(${idx})" title="Tocar para unir en superserie">${escapeHtml(ex.nombre)}</span>`
+      : `<span class="ex-name">${escapeHtml(ex.nombre)}</span>`;
+    return `
     <div class="exercise-group">
       <div class="ex-head">
-        <span class="ex-name">${escapeHtml(ex.nombre)}</span>
+        ${nombreHtml}
         <button type="button" class="remove-x" style="height:28px; width:28px; font-size:12px;" onclick="quitarBloqueEjercicio(${idx}, this)" title="Quitar ejercicio">✕</button>
       </div>
+      ${superserieLabelHtml}
       <div id="bloque-sets-${idx}">
         ${ex.sets.map((s, i) => renderSetLine(s, i, idx)).join('')}
       </div>
@@ -1369,7 +1456,8 @@ function renderDraftExercises(){
         <div style="flex:1;">${selectLadoHtml(`select-lado-${idx}`)}</div>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 
 async function cancelarSesion(){
@@ -1378,6 +1466,7 @@ async function cancelarSesion(){
     await sb.from('sesiones').delete().eq('id', activeSesionId);
   }
   activeSesionId = null; activeSesionExs = []; activeSesionDia = null;
+  activeSuperseries = []; superserieModo = false; superserieEsperando = null;
   renderAlumnoHome();
 }
 
@@ -1424,6 +1513,7 @@ async function finalizarSesion(){
   }
 
   activeSesionId = null; activeSesionExs = []; activeSesionDia = null;
+  activeSuperseries = []; superserieModo = false; superserieEsperando = null;
   renderAlumnoHome();
 }
 

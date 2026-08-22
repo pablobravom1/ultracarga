@@ -150,6 +150,13 @@ input:focus, select:focus, textarea:focus{outline:none; border-color:var(--blue)
 .remove-x{background:none; border:1px solid var(--line); color:var(--chalk-dim); border-radius:4px; cursor:pointer; height:41px; width:41px; flex-shrink:0;}
 .ex-nota{font-size:12px; color:var(--chalk-dim); background:var(--ink); border-radius:4px; padding:6px 10px; margin:-2px 0 8px; line-height:1.4;}
 
+.fab-superserie{position:fixed; bottom:16px; right:16px; width:44px; height:44px; border-radius:50%; background:var(--surface-2); border:1px solid var(--line); color:var(--chalk-dim); display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:45; opacity:0.88; box-shadow:0 2px 8px rgba(0,0,0,0.3);}
+.fab-superserie.active{background:var(--blue); color:var(--ink); border-color:var(--blue); opacity:1;}
+.superserie-label{font-size:11.5px; color:var(--chalk-dim); background:var(--ink); border-radius:4px; padding:6px 10px; margin:-2px 0 8px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;}
+.superserie-label b{color:var(--chalk);}
+.ex-name-seleccionable{cursor:pointer; text-decoration:underline dotted; text-underline-offset:3px;}
+.ex-name-seleccionable.seleccionando{color:var(--blue);}
+
 .chart-wrap{background:var(--surface); border:1px solid var(--line); border-radius:6px; padding:16px; margin-bottom:16px;}
 .chart-wrap canvas{max-height:220px;}
 
