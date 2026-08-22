@@ -98,6 +98,34 @@ function formatDate(iso){
   const d = new Date(iso + 'T12:00:00');
   return d.toLocaleDateString('es-CL', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
 }
+
+// ---------- TIPO DE SERIE / LADO (drop set, rest-pause, forzada al fallo, unilateral/bilateral) ----------
+// Campos opcionales y aditivos: no reemplazan nada de lo que ya existía (reps/peso/nota).
+const TIPO_SERIE_LABELS = { drop_set: 'Drop set', rest_pause: 'Rest-pause', forzada: 'Forzada al fallo' };
+const LADO_LABELS = { unilateral: 'Unilateral', bilateral: 'Bilateral', peso_por_lado: 'Peso por lado' };
+function selectTipoSerieHtml(id, valorActual){
+  const v = valorActual || '';
+  return `<select id="${id}">
+    <option value=""${v===''?' selected':''}>Tipo de serie (opcional)</option>
+    <option value="drop_set"${v==='drop_set'?' selected':''}>Drop set</option>
+    <option value="rest_pause"${v==='rest_pause'?' selected':''}>Rest-pause</option>
+    <option value="forzada"${v==='forzada'?' selected':''}>Forzada al fallo</option>
+  </select>`;
+}
+function selectLadoHtml(id, valorActual){
+  const v = valorActual || '';
+  return `<select id="${id}">
+    <option value=""${v===''?' selected':''}>Lado (opcional)</option>
+    <option value="unilateral"${v==='unilateral'?' selected':''}>Unilateral</option>
+    <option value="bilateral"${v==='bilateral'?' selected':''}>Bilateral</option>
+    <option value="peso_por_lado"${v==='peso_por_lado'?' selected':''}>Peso por lado</option>
+  </select>`;
+}
+function renderTipoLadoPills(tipoSerie, lado){
+  const tipoPill = tipoSerie && TIPO_SERIE_LABELS[tipoSerie] ? `<span class="pill" style="padding:2px 8px; font-size:10.5px;">${TIPO_SERIE_LABELS[tipoSerie]}</span>` : '';
+  const ladoPill = lado && LADO_LABELS[lado] ? `<span class="pill" style="padding:2px 8px; font-size:10.5px;">${LADO_LABELS[lado]}</span>` : '';
+  return `${tipoPill}${ladoPill}`;
+}
 function formatDateShort(iso){
   const d = new Date(iso + 'T12:00:00');
   return d.toLocaleDateString('es-CL', { day:'numeric', month:'short' });
@@ -1210,9 +1238,10 @@ async function seleccionarDiaSesion(nombre){
 
 function renderSetLine(s, i, idx){
   const nota = s.nota ? `<span class="pill" style="padding:2px 8px; font-size:10.5px;">${escapeHtml(s.nota)}</span>` : '';
+  const tipoLado = renderTipoLadoPills(s.tipo_serie, s.lado);
   const pr = s._isPR ? '<span class="pill pr">🔥 PR</span>' : '';
   const btnBorrar = (idx != null && s.id) ? `<button type="button" class="remove-x" style="height:22px; width:22px; font-size:10px; flex-shrink:0;" onclick="eliminarSetIndividual(${idx}, '${s.id}')" title="Quitar esta serie">✕</button>` : '';
-  return `<div class="set-line"><span>S${i+1}: <b>${s.reps}</b> × <b>${s.peso}kg</b>${nota ? ` ${nota}` : ''}${pr ? ` ${pr}` : ''}</span>${btnBorrar}</div>`;
+  return `<div class="set-line"><span>S${i+1}: <b>${s.reps}</b> × <b>${s.peso}kg</b>${nota ? ` ${nota}` : ''}${tipoLado ? ` ${tipoLado}` : ''}${pr ? ` ${pr}` : ''}</span>${btnBorrar}</div>`;
 }
 
 async function eliminarSetIndividual(idx, setId){
@@ -1234,9 +1263,13 @@ async function agregarSetABloque(idx){
   const pesoEl = document.getElementById(`input-peso-${idx}`);
   const repsEl = document.getElementById(`input-reps-${idx}`);
   const notaEl = document.getElementById(`input-nota-${idx}`);
+  const tipoSerieEl = document.getElementById(`select-tiposerie-${idx}`);
+  const ladoEl = document.getElementById(`select-lado-${idx}`);
   const peso = pesoEl ? pesoEl.value : '';
   const reps = repsEl ? repsEl.value : '';
   const nota = notaEl ? notaEl.value.trim() : '';
+  const tipo_serie = tipoSerieEl ? tipoSerieEl.value : '';
+  const lado = ladoEl ? ladoEl.value : '';
   if(!reps){ showToast('Completa las repeticiones'); return; }
 
   const btn = document.getElementById(`btn-serie-${idx}`);
@@ -1248,6 +1281,8 @@ async function agregarSetABloque(idx){
     peso: peso || 0,
     reps: reps,
     nota: nota || null,
+    tipo_serie: tipo_serie || null,
+    lado: lado || null,
     orden
   }).select().single();
   if(btn) btn.disabled = false;
@@ -1274,6 +1309,8 @@ async function agregarSetABloque(idx){
   if(pesoEl) pesoEl.value = '';
   if(repsEl){ repsEl.value = ''; repsEl.focus(); }
   if(notaEl) notaEl.value = '';
+  if(tipoSerieEl) tipoSerieEl.value = '';
+  if(ladoEl) ladoEl.value = '';
   showToast(esPR ? `🔥 ¡Nuevo récord en ${grupo.nombre}!` : 'Serie guardada ✓');
 }
 
@@ -1324,6 +1361,10 @@ function renderDraftExercises(){
         <div><button type="button" class="btn-sm" id="btn-serie-${idx}" style="width:100%;" onclick="agregarSetABloque(${idx})">+ Serie</button></div>
       </div>
       <input type="text" id="input-nota-${idx}" placeholder="Nota de esta serie (opcional): drop set, rest-pause, al fallo..." style="margin-top:8px; margin-bottom:0;">
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <div style="flex:1;">${selectTipoSerieHtml(`select-tiposerie-${idx}`)}</div>
+        <div style="flex:1;">${selectLadoHtml(`select-lado-${idx}`)}</div>
+      </div>
     </div>
   `).join('');
 }
