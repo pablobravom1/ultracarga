@@ -156,11 +156,33 @@ function estaVencida(fechaIso, diasVigencia){
   return fechaIso < addDaysStr(todayStr(), -diasVigencia);
 }
 // Línea de estado "Rutina: 12 ago (vencida)" — en rojo si venció. Uso exclusivo de vistas de coach/super admin.
-function renderEstadoVencimiento(label, fechaIso, diasVigencia, sinRegistroTexto){
+// notaExtra es opcional (ej. "no aplica"/"no quiso") — se agrega entre paréntesis
+// junto a la fecha, para las filas de excepción de medición (que sí tienen fecha
+// y sí se vencen igual que una medición real, pero no son una medición de verdad).
+function renderEstadoVencimiento(label, fechaIso, diasVigencia, sinRegistroTexto, notaExtra){
   if(!fechaIso) return `<span>${escapeHtml(label)}: ${escapeHtml(sinRegistroTexto)}</span>`;
   const vencida = estaVencida(fechaIso, diasVigencia);
-  const texto = `${escapeHtml(label)}: ${formatDateShort(fechaIso)}${vencida ? ' (vencida)' : ''}`;
+  const notaTxt = notaExtra ? ` (${escapeHtml(notaExtra)})` : '';
+  const texto = `${escapeHtml(label)}: ${formatDateShort(fechaIso)}${notaTxt}${vencida ? ' (vencida)' : ''}`;
   return vencida ? `<span style="color:var(--red); font-weight:600;">${texto}</span>` : `<span>${texto}</span>`;
+}
+
+// Texto corto para mostrar el "tipo" de una fila de medición/excepción.
+function notaTipoMedicion(tipo){
+  if(tipo === 'no_aplica') return 'no aplica';
+  if(tipo === 'no_quiso') return 'no quiso';
+  return null;
+}
+
+// Línea de estado de entrevista ("Entrevista: 12 ago", "Entrevista: No aplica",
+// "Entrevista: NO realizada") — usada en los listados de alumnos. La entrevista
+// nunca vence, así que a diferencia de renderEstadoVencimiento acá no hay riesgo
+// de "vencida".
+function textoEstadoEntrevista(a){
+  if(a.entrevista_audio_url) return 'Entrevista: ' + (a.entrevista_fecha ? formatDateShort(a.entrevista_fecha) : 'realizada');
+  if(a.entrevista_excepcion === 'no_aplica') return 'Entrevista: No aplica';
+  if(a.entrevista_excepcion === 'no_quiso') return 'Entrevista: No quiso';
+  return 'Entrevista: NO realizada';
 }
 
 function computeStreak(fechas){
@@ -795,15 +817,21 @@ async function renderMediciones(holderId, alumnoId, soloLectura){
   const { data: mediciones } = await sb.from('mediciones').select('*').eq('alumno_id', alumnoId).order('fecha', { ascending: false });
 
   const listaHtml = (mediciones && mediciones.length)
-    ? mediciones.map(m => `
+    ? mediciones.map(m => {
+      const nota = notaTipoMedicion(m.tipo);
+      const cuerpo = m.tipo === 'medicion'
+        ? `<img class="session-photo" src="${m.foto_url}" alt="Medición InBody">`
+        : `<div class="empty" style="margin:0;">${m.tipo === 'no_aplica' ? 'No aplica' : 'El alumno no quiso hacerse la medición'}</div>`;
+      return `
       <div class="session-card">
-        <div class="session-head"><span>${formatDate(m.fecha)}</span></div>
+        <div class="session-head"><span>${formatDate(m.fecha)}${nota ? ' — ' + escapeHtml(nota) : ''}</span></div>
         <div class="session-body">
-          <img class="session-photo" src="${m.foto_url}" alt="Medición InBody">
+          ${cuerpo}
           ${soloLectura ? '' : `<button class="btn-sm btn-eliminar-sesion" data-id="${m.id}" style="margin-top:12px;">Eliminar medición</button>`}
         </div>
       </div>
-    `).join('')
+    `;
+    }).join('')
     : `<div class="empty">Aún no hay mediciones registradas.</div>`;
 
   holder.innerHTML = soloLectura ? listaHtml : `
@@ -815,6 +843,11 @@ async function renderMediciones(holderId, alumnoId, soloLectura){
         <input type="file" id="input-foto-medicion" accept="image/*">
       </label>
       <button class="btn" id="btn-guardar-medicion">${ICONS.plus} Guardar medición</button>
+      <div class="sub" style="margin-top:10px; margin-bottom:6px;">¿El alumno no se pudo o no quiso medir esta vez? Igual cuenta como al día por 2 meses, como una medición real:</div>
+      <div class="row-flex" style="margin-bottom:0; gap:8px;">
+        <button type="button" class="btn-sm" id="btn-medicion-no-aplica" style="flex:1; justify-content:center;">No aplica</button>
+        <button type="button" class="btn-sm" id="btn-medicion-no-quiso" style="flex:1; justify-content:center;">No quiso</button>
+      </div>
     </div>
     ${listaHtml}
   `;
@@ -826,6 +859,8 @@ async function renderMediciones(holderId, alumnoId, soloLectura){
     document.getElementById('medicion-foto-label-text').innerHTML = f ? `${ICONS.check} ${escapeHtml(f.name)}` : `${ICONS.camera} Sube la foto del resumen de InBody`;
   };
   document.getElementById('btn-guardar-medicion').onclick = () => guardarMedicion(alumnoId, holderId);
+  document.getElementById('btn-medicion-no-aplica').onclick = () => guardarMedicionExcepcion(alumnoId, holderId, 'no_aplica');
+  document.getElementById('btn-medicion-no-quiso').onclick = () => guardarMedicionExcepcion(alumnoId, holderId, 'no_quiso');
 
   holder.querySelectorAll('.btn-eliminar-sesion').forEach(btn => {
     btn.onclick = () => {
@@ -868,6 +903,28 @@ async function guardarMedicion(alumnoId, holderId){
     showToast('Hubo un problema guardando la medición');
     btn.disabled = false; btn.innerHTML = `${ICONS.plus} Guardar medición`;
   }
+}
+
+// Guarda una fila de "no aplica" / "no quiso" en vez de una medición real —
+// sin foto, con la fecha elegida en el formulario. Como la vigencia de
+// medición se calcula por la fecha del último registro (2 meses), esta fila
+// cuenta como "al día" exactamente igual que una medición real, y se vence
+// igual que una medición real si pasan más de 2 meses sin marcar nada nuevo.
+async function guardarMedicionExcepcion(alumnoId, holderId, tipo){
+  const fechaInput = document.getElementById('input-fecha-medicion');
+  const btnAplica = document.getElementById('btn-medicion-no-aplica');
+  const btnQuiso = document.getElementById('btn-medicion-no-quiso');
+  if(btnAplica) btnAplica.disabled = true;
+  if(btnQuiso) btnQuiso.disabled = true;
+  const { error } = await sb.from('mediciones').insert({ alumno_id: alumnoId, fecha: fechaInput.value, tipo, foto_url: null });
+  if(error){
+    showToast('No se pudo guardar');
+    if(btnAplica) btnAplica.disabled = false;
+    if(btnQuiso) btnQuiso.disabled = false;
+    return;
+  }
+  showToast(tipo === 'no_aplica' ? 'Guardado como "No aplica"' : 'Guardado como "No quiso"');
+  renderMediciones(holderId, alumnoId);
 }
 
 async function eliminarMedicion(id, alumnoId, holderId){
@@ -1033,7 +1090,15 @@ function inicializarReproductorAudio(contenedor){
   bar.addEventListener('click', (e) => buscarPorPosicion(e.clientX));
 }
 
-async function renderEntrevista(holderId, alumnoId, audioUrl, fecha, soloLectura, duracionSeg){
+// Texto de la tarjeta cuando la entrevista está marcada como excepción
+// (no_aplica / no_quiso) en vez de tener un audio real. La entrevista nunca
+// vence, así que esta marca cuenta como "al día" para siempre, hasta que un
+// profe la deshaga a mano.
+function textoExcepcionEntrevista(excepcion){
+  return excepcion === 'no_aplica' ? 'No aplica' : 'El alumno no quiso hacer la entrevista';
+}
+
+async function renderEntrevista(holderId, alumnoId, audioUrl, fecha, soloLectura, duracionSeg, excepcion){
   const holder = document.getElementById(holderId);
   entrevistaAudioDuracionSeg = null;
 
@@ -1042,6 +1107,11 @@ async function renderEntrevista(holderId, alumnoId, audioUrl, fecha, soloLectura
       <div class="card">
         <div class="sub" style="margin-bottom:8px;">${fecha ? 'Grabada el ' + formatDateShort(fecha) : 'Fecha no registrada'}</div>
         ${htmlReproductorAudio(audioUrl, duracionSeg)}
+      </div>
+    ` : excepcion ? `
+      <div class="card">
+        <div class="sub" style="margin-bottom:8px;">${fecha ? 'Marcado el ' + formatDateShort(fecha) : ''}</div>
+        <div>${textoExcepcionEntrevista(excepcion)}</div>
       </div>
     ` : `<div class="empty">Todavía no se registró la entrevista inicial.</div>`;
     if(audioUrl) inicializarReproductorAudio(holder);
@@ -1053,6 +1123,12 @@ async function renderEntrevista(holderId, alumnoId, audioUrl, fecha, soloLectura
       <div class="sub" style="margin-bottom:8px;">${fecha ? 'Grabada el ' + formatDateShort(fecha) : 'Fecha no registrada'}</div>
       ${htmlReproductorAudio(audioUrl, duracionSeg)}
       <button class="btn-sm btn-eliminar-sesion" id="btn-eliminar-entrevista" style="margin-top:12px;">Eliminar entrevista</button>
+    </div>
+  ` : excepcion ? `
+    <div class="card">
+      <div class="sub" style="margin-bottom:8px;">${fecha ? 'Marcado el ' + formatDateShort(fecha) : ''}</div>
+      <div>${textoExcepcionEntrevista(excepcion)}</div>
+      <button class="btn-sm" id="btn-deshacer-excepcion-entrevista" style="margin-top:12px;">Deshacer / grabar entrevista</button>
     </div>
   ` : `
     <div class="card">
@@ -1070,6 +1146,12 @@ async function renderEntrevista(holderId, alumnoId, audioUrl, fecha, soloLectura
         <input type="file" id="input-audio-entrevista" accept="audio/*">
       </label>
       <button class="btn" id="btn-guardar-entrevista">${ICONS.plus} Guardar entrevista</button>
+
+      <div class="sub" style="margin-top:10px; margin-bottom:6px;">¿El alumno no se pudo o no quiso hacer la entrevista? Queda marcado como al día para siempre:</div>
+      <div class="row-flex" style="margin-bottom:0; gap:8px;">
+        <button type="button" class="btn-sm" id="btn-entrevista-no-aplica" style="flex:1; justify-content:center;">No aplica</button>
+        <button type="button" class="btn-sm" id="btn-entrevista-no-quiso" style="flex:1; justify-content:center;">No quiso</button>
+      </div>
     </div>
   `;
 
@@ -1091,6 +1173,8 @@ async function renderEntrevista(holderId, alumnoId, audioUrl, fecha, soloLectura
         }, 3000);
       }
     };
+  } else if(excepcion){
+    document.getElementById('btn-deshacer-excepcion-entrevista').onclick = () => quitarExcepcionEntrevista(alumnoId, holderId);
   } else {
     document.getElementById('input-audio-entrevista').onchange = (e) => {
       // Si el evento es "de verdad" del usuario (isTrusted) es porque eligió
@@ -1110,7 +1194,28 @@ async function renderEntrevista(holderId, alumnoId, audioUrl, fecha, soloLectura
         iniciarGrabacionEntrevista();
       }
     };
+    document.getElementById('btn-entrevista-no-aplica').onclick = () => marcarExcepcionEntrevista(alumnoId, holderId, 'no_aplica');
+    document.getElementById('btn-entrevista-no-quiso').onclick = () => marcarExcepcionEntrevista(alumnoId, holderId, 'no_quiso');
   }
+}
+
+// Marca la entrevista como "no aplica"/"no quiso" en vez de grabar un audio
+// real. Como la entrevista nunca vence, esto cuenta como "al día" para
+// siempre hasta que se deshaga a mano (ver quitarExcepcionEntrevista).
+async function marcarExcepcionEntrevista(alumnoId, holderId, tipo){
+  const fechaInput = document.getElementById('input-fecha-entrevista');
+  const { error } = await sb.from('profiles').update({ entrevista_excepcion: tipo, entrevista_fecha: fechaInput ? fechaInput.value : todayStr() }).eq('id', alumnoId);
+  if(error){ showToast('No se pudo guardar'); return; }
+  showToast(tipo === 'no_aplica' ? 'Guardado como "No aplica"' : 'Guardado como "No quiso"');
+  renderEntrevista(holderId, alumnoId, null, fechaInput ? fechaInput.value : todayStr(), false, null, tipo);
+}
+
+// Vuelve al formulario normal de entrevista (grabar/subir audio), por si se
+// marcó una excepción por error o el alumno ya está dispuesto a hacerla.
+async function quitarExcepcionEntrevista(alumnoId, holderId){
+  const { error } = await sb.from('profiles').update({ entrevista_excepcion: null, entrevista_fecha: null }).eq('id', alumnoId);
+  if(error){ showToast('No se pudo deshacer'); return; }
+  renderEntrevista(holderId, alumnoId, null, null, false, null, null);
 }
 
 async function guardarEntrevista(alumnoId, holderId){
@@ -1133,7 +1238,7 @@ async function guardarEntrevista(alumnoId, holderId){
     const { error: upErr } = await sb.storage.from('entrevistas').upload(path, file, { upsert: true });
     if(upErr){ showToast('No se pudo subir el audio'); btn.disabled = false; btn.innerHTML = `${ICONS.plus} Guardar entrevista`; return; }
     const entrevista_audio_url = sb.storage.from('entrevistas').getPublicUrl(path).data.publicUrl;
-    const { error } = await sb.from('profiles').update({ entrevista_audio_url, entrevista_fecha: fechaInput.value, entrevista_audio_duracion_seg: duracionSeg }).eq('id', alumnoId);
+    const { error } = await sb.from('profiles').update({ entrevista_audio_url, entrevista_fecha: fechaInput.value, entrevista_audio_duracion_seg: duracionSeg, entrevista_excepcion: null }).eq('id', alumnoId);
     if(error){ showToast('No se pudo guardar la entrevista'); btn.disabled = false; btn.innerHTML = `${ICONS.plus} Guardar entrevista`; return; }
     showToast('¡Entrevista guardada!');
     renderEntrevista(holderId, alumnoId, entrevista_audio_url, fechaInput.value, false, duracionSeg);
@@ -1149,7 +1254,7 @@ async function eliminarEntrevista(alumnoId, holderId, audioUrl){
   // siguiente. Borrar el archivo del storage es un segundo paso, aparte:
   // si por algo falla, el archivo queda huérfano (ocupa espacio) pero no
   // rompe nada visible en la app.
-  const { error } = await sb.from('profiles').update({ entrevista_audio_url: null, entrevista_fecha: null, entrevista_audio_duracion_seg: null }).eq('id', alumnoId);
+  const { error } = await sb.from('profiles').update({ entrevista_audio_url: null, entrevista_fecha: null, entrevista_audio_duracion_seg: null, entrevista_excepcion: null }).eq('id', alumnoId);
   if(error){ showToast('No se pudo eliminar la entrevista'); return; }
 
   const path = extraerPathStorage(audioUrl, 'entrevistas');
@@ -1926,13 +2031,14 @@ async function renderCoachHome(){
     const [{ data }, { data: rutinaActiva }, { data: medData }] = await Promise.all([
       sb.from('sesiones').select('fecha').eq('alumno_id', a.id).order('fecha', { ascending:false }).limit(1),
       sb.from('rutinas').select('fecha').eq('alumno_id', a.id).eq('activa', true).maybeSingle(),
-      sb.from('mediciones').select('fecha').eq('alumno_id', a.id).order('fecha', { ascending:false }).limit(1)
+      sb.from('mediciones').select('fecha, tipo').eq('alumno_id', a.id).order('fecha', { ascending:false }).limit(1)
     ]);
     return {
       ...a,
       ultima: data && data[0] ? data[0].fecha : null,
       rutinaFecha: rutinaActiva ? rutinaActiva.fecha : null,
-      medicionFecha: medData && medData[0] ? medData[0].fecha : null
+      medicionFecha: medData && medData[0] ? medData[0].fecha : null,
+      medicionTipo: medData && medData[0] ? medData[0].tipo : null
     };
   }));
 
@@ -2068,7 +2174,7 @@ function renderListaAlumnos(lista, esSuperAdmin, profesores, nombreProfesor, tot
       <div style="flex:1; min-width:0; cursor:pointer;" onclick="renderCoachAlumnoDetail('${a.id}')">
         <div class="coach-name">${escapeHtml(a.nombre)}</div>
         <div class="coach-meta">${a.ultima ? 'Última sesión: ' + formatDateShort(a.ultima) : 'Sin sesiones todavía'} · ${nombreProfesor(a.profesor_id) ? escapeHtml(nombreProfesor(a.profesor_id)) : 'Sin profesor asignado'}</div>
-        <div class="coach-meta" style="margin-top:2px;">${renderEstadoVencimiento('Rutina', a.rutinaFecha, 30, 'sin rutina activa')} · ${renderEstadoVencimiento('Medición', a.medicionFecha, 60, 'sin mediciones')}</div>
+        <div class="coach-meta" style="margin-top:2px;">${renderEstadoVencimiento('Rutina', a.rutinaFecha, 30, 'sin rutina activa')} · ${renderEstadoVencimiento('Medición', a.medicionFecha, 60, 'sin mediciones', notaTipoMedicion(a.medicionTipo))} · ${textoEstadoEntrevista(a)}</div>
       </div>
       ${esSuperAdmin ? `
         <select class="select-inline select-asignar-profesor" data-alumno="${a.id}">
@@ -2193,7 +2299,7 @@ function renderListaAlumnosProfesor(holderId, profesor, alumnosDelProfesor){
             <span>${escapeHtml(a.nombre)}</span>
             ${a.ultima ? `<span>${formatDateShort(a.ultima)}</span>` : ''}
           </div>
-          <div style="font-size:10.5px;">${renderEstadoVencimiento('Rutina', a.rutinaFecha, 30, 'sin rutina activa')} · ${renderEstadoVencimiento('Medición', a.medicionFecha, 60, 'sin mediciones')} · ${a.entrevista_audio_url ? 'Entrevista: ' + (a.entrevista_fecha ? formatDateShort(a.entrevista_fecha) : 'realizada') : 'Entrevista: NO realizada'}</div>
+          <div style="font-size:10.5px;">${renderEstadoVencimiento('Rutina', a.rutinaFecha, 30, 'sin rutina activa')} · ${renderEstadoVencimiento('Medición', a.medicionFecha, 60, 'sin mediciones', notaTipoMedicion(a.medicionTipo))} · ${textoEstadoEntrevista(a)}</div>
         </div>
       `).join('')}
     </div>
@@ -2319,9 +2425,12 @@ function lineaAlumnoPDF(doc, a, x, y){
   y += 5.5;
 
   doc.setFontSize(9);
+  const notaMedicion = notaTipoMedicion(a.medicionTipo);
   const rutinaTxt = a.rutinaFecha ? `Macrociclo: ${formatDateShort(a.rutinaFecha)}${a.rutinaOk ? '' : ' (VENCIDA)'}` : 'Macrociclo: sin macrociclo activo';
-  const medicionTxt = a.medicionFecha ? `Medición: ${formatDateShort(a.medicionFecha)}${a.medicionOk ? '' : ' (VENCIDA)'}` : 'Medición: sin mediciones';
-  const entrevistaTxt = a.entrevistaOk ? `Entrevista: ${a.entrevista_fecha ? formatDateShort(a.entrevista_fecha) : 'realizada'}` : 'Entrevista: NO realizada';
+  const medicionTxt = a.medicionFecha ? `Medición: ${formatDateShort(a.medicionFecha)}${notaMedicion ? ' (' + notaMedicion + ')' : ''}${a.medicionOk ? '' : ' (VENCIDA)'}` : 'Medición: sin mediciones';
+  const entrevistaTxt = a.entrevista_audio_url ? `Entrevista: ${a.entrevista_fecha ? formatDateShort(a.entrevista_fecha) : 'realizada'}`
+    : a.entrevista_excepcion ? `Entrevista: ${a.entrevista_excepcion === 'no_aplica' ? 'No aplica' : 'No quiso'}`
+    : 'Entrevista: NO realizada';
   doc.text(`   ${rutinaTxt}   ·   ${medicionTxt}   ·   ${entrevistaTxt}`, x, y);
   return y + 7;
 }
@@ -2338,7 +2447,7 @@ async function descargarPDFEstadoProtocolos(profesores, alumnos){
     ...a,
     rutinaOk: !!a.rutinaFecha && !estaVencida(a.rutinaFecha, 30),
     medicionOk: !!a.medicionFecha && !estaVencida(a.medicionFecha, 60),
-    entrevistaOk: !!a.entrevista_audio_url
+    entrevistaOk: !!a.entrevista_audio_url || !!a.entrevista_excepcion
   }));
 
   const statsPorProfesor = profesores
@@ -2535,7 +2644,7 @@ async function renderCoachAlumnoDetail(alumnoId){
     sb.from('sesiones').select('*, sesion_series(*)').eq('alumno_id', alumnoId).order('fecha', { ascending:false }),
     sb.from('rutinas').select('*, rutina_ejercicios(*)').eq('alumno_id', alumnoId).eq('activa', true).maybeSingle(),
     sb.from('rutinas').select('id').eq('alumno_id', alumnoId).eq('activa', false),
-    sb.from('mediciones').select('fecha').eq('alumno_id', alumnoId).order('fecha', { ascending:false }).limit(1)
+    sb.from('mediciones').select('fecha, tipo').eq('alumno_id', alumnoId).order('fecha', { ascending:false }).limit(1)
   ]);
 
   const todasSesiones = markPRs(sesiones || []);
@@ -2543,6 +2652,7 @@ async function renderCoachAlumnoDetail(alumnoId){
   const fechas = conSeries.map(s => s.fecha);
   const diasRutina = (rutina && rutina.rutina_ejercicios) ? groupPorDia(rutina.rutina_ejercicios) : [];
   const medicionFecha = medicionesUltima && medicionesUltima[0] ? medicionesUltima[0].fecha : null;
+  const medicionTipo = medicionesUltima && medicionesUltima[0] ? medicionesUltima[0].tipo : null;
   const rutinaVencida = rutina ? estaVencida(rutina.fecha, 30) : false;
   // Modo observador: un profesor que no es el asignado a este alumno puede entrar a mirar
   // (por ejemplo si el profe titular faltó), pero no puede crear, editar ni eliminar nada.
@@ -2571,7 +2681,7 @@ async function renderCoachAlumnoDetail(alumnoId){
 
     <div class="card" style="font-size:12.5px;">
       <div>${renderEstadoVencimiento('Última rutina', rutina ? rutina.fecha : null, 30, 'sin rutina activa')}</div>
-      <div style="margin-top:4px;">${renderEstadoVencimiento('Última medición', medicionFecha, 60, 'sin mediciones registradas')}</div>
+      <div style="margin-top:4px;">${renderEstadoVencimiento('Última medición', medicionFecha, 60, 'sin mediciones registradas', notaTipoMedicion(medicionTipo))}</div>
     </div>
 
     ${rutina ? `
@@ -2690,7 +2800,7 @@ async function renderCoachAlumnoDetail(alumnoId){
   {
     let entrevistaInicializada = false;
     wireToggle('btn-toggle-entrevista', 'entrevista-holder', () => {
-      if(!entrevistaInicializada){ renderEntrevista('entrevista-holder', alumnoId, alumno.entrevista_audio_url, alumno.entrevista_fecha, soloObservador, alumno.entrevista_audio_duracion_seg); entrevistaInicializada = true; }
+      if(!entrevistaInicializada){ renderEntrevista('entrevista-holder', alumnoId, alumno.entrevista_audio_url, alumno.entrevista_fecha, soloObservador, alumno.entrevista_audio_duracion_seg, alumno.entrevista_excepcion); entrevistaInicializada = true; }
     });
   }
   wireToggle('btn-toggle-calendario', 'calendar-holder');
