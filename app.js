@@ -45,7 +45,9 @@ const ICONS = {
   share: `<svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"></path><polyline points="16 6 12 2 8 6"></polyline><line x1="12" y1="2" x2="12" y2="15"></line></svg>`,
   search: `<svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>`,
   mic: `<svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`,
-  edit: `<svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>`
+  edit: `<svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>`,
+  play: `<svg viewBox="0 0 24 24" fill="currentColor"><polygon points="6 3 21 12 6 21"></polygon></svg>`,
+  pause: `<svg viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="3" width="5" height="18"></rect><rect x="14" y="3" width="5" height="18"></rect></svg>`
 };
 // Markup del lado derecho de un botón-toggle: texto según estado + flecha que rota.
 function toggleStateHtml(closedTxt){
@@ -880,7 +882,15 @@ let entrevistaMediaRecorder = null;
 let entrevistaRecStream = null;
 let entrevistaRecStart = null;
 let entrevistaRecInterval = null;
-let entrevistaRecDurationMs = 0; // duración real medida por nosotros (Chrome no la escribe bien en el archivo webm)
+let entrevistaRecDurationMs = 0;
+// Duración real (en segundos) del audio recién grabado con el botón "Grabar
+// audio aquí", medida por la propia app con un cronómetro (Date.now()) —
+// no depende de la duración que el navegador escriba (o no) dentro del
+// archivo .webm. Se guarda en la base de datos junto con el audio para que
+// el reproductor siempre muestre el tiempo real. Se limpia a null apenas el
+// usuario elige un archivo a mano (nota de voz subida), porque de ese
+// archivo no tenemos una medición propia — ver comentarios más abajo.
+let entrevistaAudioDuracionSeg = null;
 
 function formatMSS(segs){
   const m = Math.floor(segs/60), s = segs%60;
@@ -908,28 +918,19 @@ async function iniciarGrabacionEntrevista(){
     entrevistaRecStream.getTracks().forEach(t => t.stop());
     entrevistaRecStream = null;
     const blob = new Blob(chunks, { type: entrevistaMediaRecorder.mimeType || 'audio/webm' });
-    const construirArchivoYSubir = (blobFinal) => {
-      const ext = (blobFinal.type.split('/')[1] || 'webm').split(';')[0];
-      const file = new File([blobFinal], `entrevista-${Date.now()}.${ext}`, { type: blobFinal.type });
-      const dt = new DataTransfer();
-      dt.items.add(file);
-      const input = document.getElementById('input-audio-entrevista');
-      if(input){
-        input.files = dt.files;
-        input.dispatchEvent(new Event('change'));
-      }
-    };
-    // Chrome graba el audio bien, pero no escribe la duración real dentro del
-    // archivo .webm (por eso algunos reproductores muestran una duración
-    // absurda tipo "3:10:58" en vez de los segundos reales). Como nosotros sí
-    // sabemos cuánto duró de verdad (entrevistaRecDurationMs), reparamos esa
-    // metadata antes de subir el archivo. Si la librería no cargó por algún
-    // motivo, seguimos igual con el archivo original (se sube el audio igual,
-    // solo que con la duración mostrada mal en algunos reproductores).
-    if(typeof ysFixWebmDuration === 'function' && entrevistaRecDurationMs > 0){
-      ysFixWebmDuration(blob, entrevistaRecDurationMs, (blobArreglado) => construirArchivoYSubir(blobArreglado || blob));
-    } else {
-      construirArchivoYSubir(blob);
+    const ext = (blob.type.split('/')[1] || 'webm').split(';')[0];
+    const file = new File([blob], `entrevista-${Date.now()}.${ext}`, { type: blob.type });
+    // Guardamos la duración medida por nuestro cronómetro ANTES de disparar el
+    // "change" del input — el handler de ese evento (definido en renderEntrevista)
+    // solo la borra cuando el evento es "de verdad" del usuario (isTrusted),
+    // así que este valor sigue disponible cuando se guarde la entrevista.
+    entrevistaAudioDuracionSeg = entrevistaRecDurationMs > 0 ? Math.round(entrevistaRecDurationMs / 1000) : null;
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    const input = document.getElementById('input-audio-entrevista');
+    if(input){
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change'));
     }
     entrevistaMediaRecorder = null;
   };
@@ -963,23 +964,94 @@ function extraerPathStorage(publicUrl, bucket){
   return decodeURIComponent(publicUrl.slice(idx + marker.length));
 }
 
-async function renderEntrevista(holderId, alumnoId, audioUrl, fecha, soloLectura){
+// Markup del reproductor propio de audio (ver comentario junto a
+// entrevistaAudioDuracionSeg más arriba: no usamos los controles nativos del
+// navegador porque su duración mostrada puede venir mal desde el archivo).
+// duracionSeg puede ser null si no la medimos nosotros (ej. nota de voz
+// subida a mano) — en ese caso el reproductor intenta usar la duración que
+// reporte el propio navegador al cargar el audio, y si tampoco la tiene,
+// muestra "--:--" en vez de un número inventado o erróneo.
+function htmlReproductorAudio(audioUrl, duracionSeg){
+  return `
+    <div class="audio-player" data-duracion="${duracionSeg != null ? duracionSeg : ''}">
+      <audio preload="metadata" src="${audioUrl}"></audio>
+      <button type="button" class="audio-player-play" aria-label="Reproducir">${ICONS.play}</button>
+      <div class="audio-player-bar"><div class="audio-player-fill"></div></div>
+      <span class="audio-player-time">0:00 / ${duracionSeg != null ? formatMSS(duracionSeg) : '--:--'}</span>
+    </div>
+  `;
+}
+
+// Conecta el <audio> real con los controles propios dibujados por
+// htmlReproductorAudio(). Se apoya en el tiempo que reporta el propio
+// elemento <audio> (currentTime), que siempre es correcto durante la
+// reproducción — lo único que no era confiable era el dato de duración
+// TOTAL leído del archivo, por eso ese número se maneja aparte.
+function inicializarReproductorAudio(contenedor){
+  const cont = contenedor.querySelector('.audio-player');
+  if(!cont) return;
+  const audio = cont.querySelector('audio');
+  const btnPlay = cont.querySelector('.audio-player-play');
+  const bar = cont.querySelector('.audio-player-bar');
+  const fill = cont.querySelector('.audio-player-fill');
+  const timeEl = cont.querySelector('.audio-player-time');
+  let total = cont.dataset.duracion ? Number(cont.dataset.duracion) : null;
+
+  const actualizarTexto = () => {
+    const actual = formatMSS(Math.floor(audio.currentTime || 0));
+    const totalTxt = total != null ? formatMSS(total) : '--:--';
+    timeEl.textContent = `${actual} / ${totalTxt}`;
+    if(total){
+      const pct = Math.max(0, Math.min(1, (audio.currentTime || 0) / total)) * 100;
+      fill.style.width = pct + '%';
+    }
+  };
+
+  audio.addEventListener('loadedmetadata', () => {
+    // Solo confiamos en audio.duration cuando no teníamos ya una duración
+    // medida por nosotros — para audios grabados en vivo, ese dato del
+    // navegador puede ser justamente el que viene mal.
+    if(total == null && isFinite(audio.duration) && audio.duration > 0){
+      total = Math.round(audio.duration);
+    }
+    actualizarTexto();
+  });
+  audio.addEventListener('timeupdate', actualizarTexto);
+  audio.addEventListener('play', () => { btnPlay.innerHTML = ICONS.pause; });
+  audio.addEventListener('pause', () => { btnPlay.innerHTML = ICONS.play; });
+  audio.addEventListener('ended', () => { btnPlay.innerHTML = ICONS.play; });
+
+  btnPlay.onclick = () => { audio.paused ? audio.play() : audio.pause(); };
+
+  const buscarPorPosicion = (clientX) => {
+    if(!total) return;
+    const rect = bar.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    audio.currentTime = pct * total;
+    actualizarTexto();
+  };
+  bar.addEventListener('click', (e) => buscarPorPosicion(e.clientX));
+}
+
+async function renderEntrevista(holderId, alumnoId, audioUrl, fecha, soloLectura, duracionSeg){
   const holder = document.getElementById(holderId);
+  entrevistaAudioDuracionSeg = null;
 
   if(soloLectura){
     holder.innerHTML = audioUrl ? `
       <div class="card">
         <div class="sub" style="margin-bottom:8px;">${fecha ? 'Grabada el ' + formatDateShort(fecha) : 'Fecha no registrada'}</div>
-        <audio controls style="width:100%;" src="${audioUrl}"></audio>
+        ${htmlReproductorAudio(audioUrl, duracionSeg)}
       </div>
     ` : `<div class="empty">Todavía no se registró la entrevista inicial.</div>`;
+    if(audioUrl) inicializarReproductorAudio(holder);
     return;
   }
 
   holder.innerHTML = audioUrl ? `
     <div class="card">
       <div class="sub" style="margin-bottom:8px;">${fecha ? 'Grabada el ' + formatDateShort(fecha) : 'Fecha no registrada'}</div>
-      <audio controls style="width:100%;" src="${audioUrl}"></audio>
+      ${htmlReproductorAudio(audioUrl, duracionSeg)}
       <button class="btn-sm btn-eliminar-sesion" id="btn-eliminar-entrevista" style="margin-top:12px;">Eliminar entrevista</button>
     </div>
   ` : `
@@ -1002,6 +1074,7 @@ async function renderEntrevista(holderId, alumnoId, audioUrl, fecha, soloLectura
   `;
 
   if(audioUrl){
+    inicializarReproductorAudio(holder);
     const btnDel = document.getElementById('btn-eliminar-entrevista');
     btnDel.onclick = () => {
       if(btnDel.dataset.confirm === '1'){
@@ -1020,6 +1093,12 @@ async function renderEntrevista(holderId, alumnoId, audioUrl, fecha, soloLectura
     };
   } else {
     document.getElementById('input-audio-entrevista').onchange = (e) => {
+      // Si el evento es "de verdad" del usuario (isTrusted) es porque eligió
+      // un archivo a mano — de ese archivo no tenemos una duración medida
+      // por nosotros. Si NO es trusted, es el que acabamos de grabar
+      // nosotros mismos (ver onstop más arriba), que ya dejó su duración
+      // guardada en entrevistaAudioDuracionSeg antes de este evento.
+      if(e.isTrusted){ entrevistaAudioDuracionSeg = null; }
       const f = e.target.files[0];
       document.getElementById('entrevista-audio-label-text').innerHTML = f ? `${ICONS.check} ${escapeHtml(f.name)}` : `${ICONS.mic} Sube el audio de la entrevista`;
     };
@@ -1043,6 +1122,10 @@ async function guardarEntrevista(alumnoId, holderId){
   const MAX_BYTES = 60 * 1024 * 1024; // ~60MB — cubre una entrevista larga grabada en vivo (~2h de audio comprimido) o una nota de voz subida a mano
   if(file.size > MAX_BYTES){ showToast('El audio es muy pesado (máx. 60MB).'); return; }
 
+  // Se captura acá, antes de cualquier "await" o de volver a renderizar —
+  // renderEntrevista limpia esta variable global cada vez que se llama.
+  const duracionSeg = entrevistaAudioDuracionSeg;
+
   btn.disabled = true; btn.textContent = 'Guardando...';
   try{
     const ext = file.name.split('.').pop();
@@ -1050,10 +1133,10 @@ async function guardarEntrevista(alumnoId, holderId){
     const { error: upErr } = await sb.storage.from('entrevistas').upload(path, file, { upsert: true });
     if(upErr){ showToast('No se pudo subir el audio'); btn.disabled = false; btn.innerHTML = `${ICONS.plus} Guardar entrevista`; return; }
     const entrevista_audio_url = sb.storage.from('entrevistas').getPublicUrl(path).data.publicUrl;
-    const { error } = await sb.from('profiles').update({ entrevista_audio_url, entrevista_fecha: fechaInput.value }).eq('id', alumnoId);
+    const { error } = await sb.from('profiles').update({ entrevista_audio_url, entrevista_fecha: fechaInput.value, entrevista_audio_duracion_seg: duracionSeg }).eq('id', alumnoId);
     if(error){ showToast('No se pudo guardar la entrevista'); btn.disabled = false; btn.innerHTML = `${ICONS.plus} Guardar entrevista`; return; }
     showToast('¡Entrevista guardada!');
-    renderEntrevista(holderId, alumnoId, entrevista_audio_url, fechaInput.value);
+    renderEntrevista(holderId, alumnoId, entrevista_audio_url, fechaInput.value, false, duracionSeg);
   }catch(e){
     showToast('Hubo un problema guardando la entrevista');
     btn.disabled = false; btn.innerHTML = `${ICONS.plus} Guardar entrevista`;
@@ -1066,7 +1149,7 @@ async function eliminarEntrevista(alumnoId, holderId, audioUrl){
   // siguiente. Borrar el archivo del storage es un segundo paso, aparte:
   // si por algo falla, el archivo queda huérfano (ocupa espacio) pero no
   // rompe nada visible en la app.
-  const { error } = await sb.from('profiles').update({ entrevista_audio_url: null, entrevista_fecha: null }).eq('id', alumnoId);
+  const { error } = await sb.from('profiles').update({ entrevista_audio_url: null, entrevista_fecha: null, entrevista_audio_duracion_seg: null }).eq('id', alumnoId);
   if(error){ showToast('No se pudo eliminar la entrevista'); return; }
 
   const path = extraerPathStorage(audioUrl, 'entrevistas');
@@ -2607,7 +2690,7 @@ async function renderCoachAlumnoDetail(alumnoId){
   {
     let entrevistaInicializada = false;
     wireToggle('btn-toggle-entrevista', 'entrevista-holder', () => {
-      if(!entrevistaInicializada){ renderEntrevista('entrevista-holder', alumnoId, alumno.entrevista_audio_url, alumno.entrevista_fecha, soloObservador); entrevistaInicializada = true; }
+      if(!entrevistaInicializada){ renderEntrevista('entrevista-holder', alumnoId, alumno.entrevista_audio_url, alumno.entrevista_fecha, soloObservador, alumno.entrevista_audio_duracion_seg); entrevistaInicializada = true; }
     });
   }
   wireToggle('btn-toggle-calendario', 'calendar-holder');

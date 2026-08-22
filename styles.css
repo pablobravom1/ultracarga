@@ -163,6 +163,18 @@ input:focus, select:focus, textarea:focus{outline:none; border-color:var(--blue)
 .photo-input-label{display:flex; align-items:center; justify-content:center; gap:8px; border:1px dashed var(--line); border-radius:4px; padding:14px; cursor:pointer; color:var(--chalk-dim); font-size:12.5px; margin-bottom:14px;}
 .photo-input-label input{display:none;}
 
+/* Reproductor de audio propio para la entrevista inicial: reemplaza los
+   controles nativos del navegador porque en algunos audios grabados en vivo
+   el archivo no trae bien escrita su duración interna, y el control nativo
+   mostraba ese número erróneo. Acá la duración total se calcula aparte
+   (medida por la app al grabar) y no depende de ese dato del archivo. */
+.audio-player{display:flex; align-items:center; gap:10px; background:var(--ink); border:1px solid var(--line); border-radius:4px; padding:10px 12px;}
+.audio-player-play{flex-shrink:0; width:34px; height:34px; border-radius:50%; background:var(--blue); color:var(--ink); border:none; display:flex; align-items:center; justify-content:center; cursor:pointer; padding:0;}
+.audio-player-play svg{width:14px; height:14px;}
+.audio-player-bar{position:relative; flex:1; height:6px; background:var(--surface-2); border-radius:3px; cursor:pointer;}
+.audio-player-fill{position:absolute; left:0; top:0; height:100%; width:0%; background:var(--blue); border-radius:3px; pointer-events:none;}
+.audio-player-time{flex-shrink:0; font-family:'IBM Plex Mono'; font-size:11.5px; color:var(--chalk-dim); white-space:nowrap;}
+
 .auth-switch{text-align:center; margin-top:14px; font-size:12.5px; color:var(--chalk-dim);}
 .auth-switch button{background:none; border:none; color:var(--blue); text-decoration:underline; cursor:pointer; font-size:12.5px;}
 
