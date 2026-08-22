@@ -20,6 +20,7 @@ let rutinaEditorDias = [];   // bloques de día del editor de rutina (coach)
 let rutinaEditorId = null;   // si se está editando una rutina existente en vez de crear una nueva
 let progresoChart = null;
 let cacheSeriesHistorial = {}; // set.id -> {reps, peso, nota, i, _isPR} — para poder editar una serie ya guardada desde el historial
+let historialRefrescar = null; // callback para recargar la lista de historial después de agregar un ejercicio o editar el día de una sesión pasada
 
 const root = () => document.getElementById('app-root');
 
@@ -596,7 +597,110 @@ async function guardarSerieHistorial(setId){
   showToast('Serie actualizada ✓');
 }
 
+// ---------- EDITAR SESIONES PASADAS (alumno): cambiar el día y agregar ejercicios ----------
+// Aditivo: además de editar reps/peso/nota de una serie ya guardada (arriba),
+// el alumno puede también agregar un ejercicio nuevo a un entrenamiento pasado
+// y cambiar el "día" de ese entrenamiento — igual que puede hacerlo en el de hoy.
+function mostrarEditorDiaSesion(sesionId, actual){
+  const editorHolder = document.getElementById(`dia-editor-${sesionId}`);
+  const viewHolder = document.getElementById(`dia-view-${sesionId}`);
+  if(!editorHolder) return;
+  editorHolder.classList.remove('hidden');
+  editorHolder.innerHTML = `
+    <div style="display:flex; gap:6px; margin:6px 0; flex-wrap:wrap;">
+      <input type="text" id="input-dia-editor-${sesionId}" value="${escapeHtml(actual)}" placeholder="Ej: Día 1 — Empuje" style="flex:1; min-width:140px; margin:0; padding:8px 10px; font-size:12.5px;">
+      <button type="button" class="btn-sm" onclick="guardarDiaSesion('${sesionId}')">Guardar</button>
+      <button type="button" class="link-btn" onclick="cancelarEditorDiaSesion('${sesionId}')">Cancelar</button>
+    </div>
+  `;
+  if(viewHolder) viewHolder.classList.add('hidden');
+  const input = document.getElementById(`input-dia-editor-${sesionId}`);
+  if(input){ input.focus(); input.select(); }
+}
+function cancelarEditorDiaSesion(sesionId){
+  const editorHolder = document.getElementById(`dia-editor-${sesionId}`);
+  const viewHolder = document.getElementById(`dia-view-${sesionId}`);
+  if(editorHolder){ editorHolder.classList.add('hidden'); editorHolder.innerHTML = ''; }
+  if(viewHolder) viewHolder.classList.remove('hidden');
+}
+async function guardarDiaSesion(sesionId){
+  const input = document.getElementById(`input-dia-editor-${sesionId}`);
+  const val = input ? input.value.trim() : '';
+  const { error } = await sb.from('sesiones').update({ dia_nombre: val || null }).eq('id', sesionId);
+  if(error){ showToast('No se pudo actualizar el día'); return; }
+  showToast('Día actualizado ✓');
+  if(historialRefrescar) historialRefrescar();
+}
+
+function mostrarFormAgregarEjercicioHistorial(sesionId){
+  const formHolder = document.getElementById(`agregar-ex-form-${sesionId}`);
+  const viewHolder = document.getElementById(`agregar-ex-view-${sesionId}`);
+  if(!formHolder) return;
+  formHolder.classList.remove('hidden');
+  formHolder.innerHTML = `
+    <div class="card" style="margin-top:8px;">
+      <label>Nombre del ejercicio</label>
+      <input type="text" id="hist-ex-nombre-${sesionId}" placeholder="Ej: Remo Frontal con Polea">
+      <div class="set-input-row">
+        <div><input type="number" id="hist-ex-reps-${sesionId}" placeholder="Reps" style="margin-bottom:0;"></div>
+        <div><input type="number" id="hist-ex-peso-${sesionId}" placeholder="Peso kg" style="margin-bottom:0;"></div>
+        <div><button type="button" class="btn-sm" style="width:100%;" onclick="guardarEjercicioHistorial('${sesionId}')">Guardar</button></div>
+      </div>
+      <input type="text" id="hist-ex-nota-${sesionId}" placeholder="Nota de esta serie (opcional)" style="margin-top:8px; margin-bottom:0;">
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <div style="flex:1;">${selectTipoSerieHtml(`hist-ex-tiposerie-${sesionId}`)}</div>
+        <div style="flex:1;">${selectLadoHtml(`hist-ex-lado-${sesionId}`)}</div>
+      </div>
+      <button type="button" class="link-btn" style="margin-top:8px;" onclick="cancelarFormAgregarEjercicioHistorial('${sesionId}')">Cancelar</button>
+    </div>
+  `;
+  if(viewHolder) viewHolder.classList.add('hidden');
+  const input = document.getElementById(`hist-ex-nombre-${sesionId}`);
+  if(input) input.focus();
+}
+function cancelarFormAgregarEjercicioHistorial(sesionId){
+  const formHolder = document.getElementById(`agregar-ex-form-${sesionId}`);
+  const viewHolder = document.getElementById(`agregar-ex-view-${sesionId}`);
+  if(formHolder){ formHolder.classList.add('hidden'); formHolder.innerHTML = ''; }
+  if(viewHolder) viewHolder.classList.remove('hidden');
+}
+async function guardarEjercicioHistorial(sesionId){
+  const nombreEl = document.getElementById(`hist-ex-nombre-${sesionId}`);
+  const repsEl = document.getElementById(`hist-ex-reps-${sesionId}`);
+  const pesoEl = document.getElementById(`hist-ex-peso-${sesionId}`);
+  const notaEl = document.getElementById(`hist-ex-nota-${sesionId}`);
+  const tipoSerieEl = document.getElementById(`hist-ex-tiposerie-${sesionId}`);
+  const ladoEl = document.getElementById(`hist-ex-lado-${sesionId}`);
+  const nombre = nombreEl ? nombreEl.value.trim() : '';
+  const reps = repsEl ? repsEl.value : '';
+  const peso = pesoEl ? pesoEl.value : '';
+  const nota = notaEl ? notaEl.value.trim() : '';
+  const tipo_serie = tipoSerieEl ? tipoSerieEl.value : '';
+  const lado = ladoEl ? ladoEl.value : '';
+  if(!nombre){ showToast('Escribe el nombre del ejercicio'); return; }
+  if(!reps){ showToast('Completa las repeticiones'); return; }
+
+  // El "orden" sigue después de las series que ya existen en esa sesión pasada.
+  const { count } = await sb.from('sesion_series').select('id', { count: 'exact', head: true }).eq('sesion_id', sesionId);
+  const orden = count || 0;
+
+  const { error } = await sb.from('sesion_series').insert({
+    sesion_id: sesionId,
+    ejercicio_nombre: nombre,
+    peso: peso || 0,
+    reps: reps,
+    nota: nota || null,
+    tipo_serie: tipo_serie || null,
+    lado: lado || null,
+    orden
+  });
+  if(error){ showToast('No se pudo agregar el ejercicio, intenta de nuevo'); return; }
+  showToast('Ejercicio agregado ✓');
+  if(historialRefrescar) historialRefrescar();
+}
+
 function renderSesionesList(holderId, sesiones, isCoachView, onDeleted, soloLectura){
+  historialRefrescar = onDeleted;
   const holder = document.getElementById(holderId);
   if(!sesiones.length){
     holder.innerHTML = `<div class="empty">Aún no hay entrenamientos registrados.</div>`;
@@ -614,6 +718,12 @@ function renderSesionesList(holderId, sesiones, isCoachView, onDeleted, soloLect
           <span class="pill">${totalSeries} series</span>
         </span>
       </div>
+      ${!isCoachView ? `
+        <div id="dia-view-${s.id}" style="margin:-2px 0 6px;">
+          <button type="button" class="link-btn" onclick="mostrarEditorDiaSesion('${s.id}', '${escapeHtml(s.dia_nombre || '').replace(/'/g,"\\'")}')">${s.dia_nombre ? 'Editar día' : '+ Agregar día'}</button>
+        </div>
+        <div class="hidden" id="dia-editor-${s.id}"></div>
+      ` : ''}
       <div class="session-body">
         ${groups.map(g => `
           <div class="exercise-group">
@@ -637,6 +747,12 @@ function renderSesionesList(holderId, sesiones, isCoachView, onDeleted, soloLect
             <button class="btn-sm" onclick="guardarNotaCoach('${s.id}')">Guardar nota</button>
           </div>
         ` : (s.nota_coach ? `<div class="note-box"><div class="note-label">Nota del coach</div>${escapeHtml(s.nota_coach)}</div>` : '')}
+        ${!isCoachView ? `
+          <div id="agregar-ex-view-${s.id}" style="margin-top:12px;">
+            <button type="button" class="btn-ghost" onclick="mostrarFormAgregarEjercicioHistorial('${s.id}')">+ Agregar ejercicio a este entrenamiento</button>
+          </div>
+          <div class="hidden" id="agregar-ex-form-${s.id}"></div>
+        ` : ''}
         ${soloLectura ? '' : `<button class="btn-sm btn-eliminar-sesion" data-id="${s.id}" style="margin-top:12px;">Eliminar sesión</button>`}
       </div>
     </div>
